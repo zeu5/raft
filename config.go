@@ -8,6 +8,8 @@ import (
 type Config struct {
 	HeartbeatTimeout time.Duration `json:"heartbeat_timeout"`
 	ElectionTimeout  time.Duration `json:"election_timeout"`
+	Peers            []string      `json:"peers"`
+	CurNodeIndex     int           `json:"cur_node_id"`
 }
 
 func DefaultConfig() *Config {
