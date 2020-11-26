@@ -55,6 +55,12 @@ func (s *State) CurrentTerm() int {
 	return s.currentTerm
 }
 
+func (s *State) IncCurrentTerm() {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	s.currentTerm = s.currentTerm + 1
+}
+
 func (s *State) SetCurrentTerm(t int) {
 	s.lock.Lock()
 	defer s.lock.Unlock()

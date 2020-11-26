@@ -12,12 +12,12 @@ type Message interface {
 }
 
 type AppendEntriesReq struct {
-	term         int    `json:"term"`
-	leaderId     int    `json:"leader_id"`
-	prevLogIndex int    `json:"prev_log_index"`
-	prevLogTerm  int    `json:"prev_log_term"`
-	command      string `json:"command"`
-	leaderCommit int    `json:"leader_commit"`
+	Term         int    `json:"term"`
+	LeaderId     int    `json:"leader_id"`
+	PrevLogIndex int    `json:"prev_log_index"`
+	PrevLogTerm  int    `json:"prev_log_term"`
+	Command      string `json:"command"`
+	LeaderCommit int    `json:"leader_commit"`
 }
 
 func (a *AppendEntriesReq) Marshall() []byte {
@@ -39,8 +39,8 @@ func (a *AppendEntriesReq) Type() string {
 }
 
 type AppendEntriesReply struct {
-	term    int  `json:"term"`
-	success bool `json:"success"`
+	Term    int  `json:"term"`
+	Success bool `json:"success"`
 }
 
 func (a *AppendEntriesReply) Marshall() []byte {
@@ -62,10 +62,10 @@ func (a *AppendEntriesReply) Type() string {
 }
 
 type RequestVoteReq struct {
-	term         int `json:"term"`
-	candidateId  int `json:"candidate_id"`
-	lastLogIndex int `json:"last_log_index"`
-	lastLogTerm  int `json:"last_log_term"`
+	Term         int `json:"term"`
+	CandidateId  int `json:"candidate_id"`
+	LastLogIndex int `json:"last_log_index"`
+	LastLogTerm  int `json:"last_log_term"`
 }
 
 func (r *RequestVoteReq) Type() string {
@@ -87,8 +87,8 @@ func (r *RequestVoteReq) Unmarshall(data []byte) {
 }
 
 type RequestVoteReply struct {
-	term int  `json:"term"`
-	vote bool `json:"vote"`
+	Term int  `json:"term"`
+	Vote bool `json:"vote"`
 }
 
 func (r *RequestVoteReply) Type() string {

@@ -132,55 +132,55 @@ func (n *Node) getLeader() int {
 
 func (n *Node) handleAppendEntries(a *AppendEntriesReq) {
 	term := n.state.CurrentTerm()
-	peer := n.peerStore.GetPeer(a.leaderId)
-	if a.term < term {
+	peer := n.peerStore.GetPeer(a.LeaderId)
+	if a.Term < term {
 		rep := &AppendEntriesReply{
-			term:    term,
-			success: false,
+			Term:    term,
+			Success: false,
 		}
 		n.transport.ReplyAppendEntries(peer, rep)
 		return
 	}
 
-	if a.term > term && n.state.RaftState() != Follower {
-		n.becomeFollower(a.term)
+	if a.Term > term && n.state.RaftState() != Follower {
+		n.becomeFollower(a.Term)
 	}
 
 	n.setLastContact()
-	n.setLeader(a.leaderId)
+	n.setLeader(a.LeaderId)
 
-	logAt := n.store.LogAt(a.prevLogIndex)
-	if logAt == nil || logAt.term != a.prevLogTerm {
+	logAt := n.store.LogAt(a.PrevLogIndex)
+	if logAt == nil || logAt.term != a.PrevLogTerm {
 		rep := &AppendEntriesReply{
-			term:    n.state.CurrentTerm(),
-			success: false,
+			Term:    n.state.CurrentTerm(),
+			Success: false,
 		}
 		n.transport.ReplyAppendEntries(peer, rep)
 		return
 	}
 
-	newIndex := a.prevLogIndex + 1
+	newIndex := a.PrevLogIndex + 1
 	logAt = n.store.LogAt(newIndex)
-	if logAt != nil && logAt.term != a.term {
-		n.store.ClearFrom(a.prevLogIndex)
+	if logAt != nil && logAt.term != a.Term {
+		n.store.ClearFrom(a.PrevLogIndex)
 	}
 
 	n.appendEntry(&LogEntry{
 		command: &Command{
-			data: []byte(a.command),
+			data: []byte(a.Command),
 		},
 		index: newIndex,
-		term:  a.term,
+		term:  a.Term,
 	})
 
 	lastLogIndex, _ := n.state.LastLog()
-	idx := min(a.leaderCommit, lastLogIndex)
+	idx := min(a.LeaderCommit, lastLogIndex)
 	n.state.SetCommitIndex(idx)
 	go n.processLogs()
 
 	rep := &AppendEntriesReply{
-		term:    n.state.CurrentTerm(),
-		success: true,
+		Term:    n.state.CurrentTerm(),
+		Success: true,
 	}
 	n.transport.ReplyAppendEntries(peer, rep)
 	return
@@ -199,36 +199,36 @@ func (n *Node) appendEntry(l *LogEntry) {
 
 func (n *Node) handleRequestVote(r *RequestVoteReq) {
 	curTerm := n.state.CurrentTerm()
-	peer := n.peerStore.GetPeer(r.candidateId)
+	peer := n.peerStore.GetPeer(r.CandidateId)
 
 	rep := &RequestVoteReply{
-		term: curTerm,
-		vote: false,
+		Term: curTerm,
+		Vote: false,
 	}
 	defer n.transport.ReplyRequestVote(peer, rep)
 
-	if r.term < curTerm {
+	if r.Term < curTerm {
 		return
 	}
 	lastVoteCand, lastVoteTerm := n.state.LastVote()
-	if lastVoteTerm != -1 && lastVoteTerm == r.term {
-		if lastVoteCand != -1 && lastVoteCand == r.candidateId {
-			rep.vote = true
+	if lastVoteTerm != -1 && lastVoteTerm == r.Term {
+		if lastVoteCand != -1 && lastVoteCand == r.CandidateId {
+			rep.Vote = true
 		}
 		return
 	}
 
 	lastLogIndex, lastLogTerm := n.state.LastLog()
-	if lastLogTerm > r.lastLogTerm {
+	if lastLogTerm > r.LastLogTerm {
 		return
 	}
 
-	if lastLogTerm == r.lastLogTerm && lastLogIndex > r.lastLogIndex {
+	if lastLogTerm == r.LastLogTerm && lastLogIndex > r.LastLogIndex {
 		return
 	}
 
-	n.state.SetLastVote(r.candidateId, r.term)
-	rep.vote = true
+	n.state.SetLastVote(r.CandidateId, r.Term)
+	rep.Vote = true
 	n.setLastContact()
 	return
 }
@@ -237,10 +237,10 @@ func (n *Node) handleRequestVoteReply(r *RequestVoteReply) {
 	if n.state.RaftState() != Candidate {
 		return
 	}
-	if r.term > n.state.CurrentTerm() {
-		n.becomeFollower(r.term)
+	if r.Term > n.state.CurrentTerm() {
+		n.becomeFollower(r.Term)
 	}
-	if r.vote {
+	if r.Vote {
 		n.candidateState.IncVote()
 	}
 	if n.candidateState.Votes() > (n.N/2 + 1) {
@@ -248,9 +248,35 @@ func (n *Node) handleRequestVoteReply(r *RequestVoteReply) {
 	}
 }
 
+func (n *Node) becomeCandidate() {
+	n.candidateStateLock.Lock()
+	n.candidateState = NewCandidateState()
+	n.candidateStateLock.Unlock()
+
+	n.state.SetRaftState(Candidate)
+	n.state.IncCurrentTerm()
+
+	lastIndex, lastTerm := n.state.LastLog()
+	req := &RequestVoteReq{
+		Term:         n.state.CurrentTerm(),
+		CandidateId:  n.id,
+		LastLogIndex: lastIndex,
+		LastLogTerm:  lastTerm,
+	}
+
+	for id, p := range n.peerStore.AllPeers() {
+		if id != n.id {
+			go n.transport.SendRequestVote(p, req)
+		}
+	}
+}
+
 func (n *Node) becomeLeader() {
+
 	n.leaderStateLock.Lock()
 	n.leaderState = NewLeaderState(n.N)
+	n.leaderStateLock.Unlock()
+
 	n.state.SetRaftState(Leader)
 	n.setLeader(n.id)
 }

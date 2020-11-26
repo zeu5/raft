@@ -14,6 +14,10 @@ func (s *PeerStore) GetPeer(id int) *Peer {
 	return s.peers[id]
 }
 
+func (s *PeerStore) AllPeers() map[int]*Peer {
+	return s.peers
+}
+
 func NewPeerStore(c *Config) *PeerStore {
 	s := &PeerStore{
 		curId: 0,
