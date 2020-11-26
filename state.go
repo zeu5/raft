@@ -135,12 +135,22 @@ func NewState(_ *Config) *State {
 
 type LeaderState struct {
 	nextIndex []int
+	size      int
+	lock      *sync.Mutex
 }
 
 func NewLeaderState(size int) *LeaderState {
 	return &LeaderState{
 		nextIndex: make([]int, size),
+		size:      size,
+		lock:      new(sync.Mutex),
 	}
+}
+
+func (l *LeaderState) Reset() {
+	l.lock.Lock()
+	defer l.lock.Unlock()
+	l.nextIndex = make([]int, l.size)
 }
 
 type CandidateState struct {
@@ -165,4 +175,10 @@ func (c *CandidateState) IncVote() {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 	c.votes = c.votes + 1
+}
+
+func (c *CandidateState) Reset() {
+	c.lock.Lock()
+	defer c.lock.Unlock()
+	c.votes = 1
 }

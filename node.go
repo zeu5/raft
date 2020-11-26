@@ -23,16 +23,14 @@ type Node struct {
 	leaderId       int
 	appendLock     *sync.Mutex
 
-	leaderState     *LeaderState
-	leaderStateLock *sync.Mutex
-
-	candidateState     *CandidateState
-	candidateStateLock *sync.Mutex
+	leaderState    *LeaderState
+	candidateState *CandidateState
 }
 
 func NewNode(c *Config) *Node {
 	trans := NewHTTPTransport(c)
 	timer := NewStandardTimer(c)
+	N := len(c.Peers)
 	return &Node{
 		state:          NewState(c),
 		transport:      trans,
@@ -44,14 +42,12 @@ func NewNode(c *Config) *Node {
 		peerStore:      NewPeerStore(c),
 		timer:          timer,
 		timeoutChan:    timer.TimerChan(),
-		N:              len(c.Peers),
+		N:              N,
 		lock:           new(sync.Mutex),
 		appendLock:     new(sync.Mutex),
 
-		leaderState:        nil,
-		leaderStateLock:    new(sync.Mutex),
-		candidateState:     nil,
-		candidateStateLock: new(sync.Mutex),
+		leaderState:    NewLeaderState(N),
+		candidateState: NewCandidateState(),
 	}
 }
 
@@ -92,18 +88,35 @@ func (n *Node) leaderTimeout() {
 	if n.state.RaftState() != Leader {
 		return
 	}
+	req := &AppendEntriesReq{
+		Term:     n.state.CurrentTerm(),
+		LeaderId: n.id,
+	}
+
+	for id, p := range n.peerStore.AllPeers() {
+		if id != n.id {
+			go n.transport.SendAppendEntries(p, req)
+		}
+	}
 }
 
 func (n *Node) electionTimeout() {
-
+	if n.state.RaftState() != Candidate {
+		return
+	}
+	n.becomeCandidate()
 }
 
 func (n *Node) heartbeat() {
+	if n.state.RaftState() != Follower {
+		return
+	}
 	lastContact := n.getLastContact()
 
-	if time.Now().Sub(lastContact) > n.config.HeartbeatTimeout {
-		// Become candidate
+	if time.Now().Sub(lastContact) < n.config.HeartbeatTimeout {
+		return
 	}
+	n.becomeCandidate()
 }
 
 func (n *Node) getLastContact() time.Time {
@@ -133,6 +146,7 @@ func (n *Node) getLeader() int {
 func (n *Node) handleAppendEntries(a *AppendEntriesReq) {
 	term := n.state.CurrentTerm()
 	peer := n.peerStore.GetPeer(a.LeaderId)
+
 	if a.Term < term {
 		rep := &AppendEntriesReply{
 			Term:    term,
@@ -148,6 +162,15 @@ func (n *Node) handleAppendEntries(a *AppendEntriesReq) {
 
 	n.setLastContact()
 	n.setLeader(a.LeaderId)
+
+	if a.Command == "" {
+		rep := &AppendEntriesReply{
+			Term:    n.state.CurrentTerm(),
+			Success: true,
+		}
+		n.transport.ReplyAppendEntries(peer, rep)
+		return
+	}
 
 	logAt := n.store.LogAt(a.PrevLogIndex)
 	if logAt == nil || logAt.term != a.PrevLogTerm {
@@ -184,6 +207,13 @@ func (n *Node) handleAppendEntries(a *AppendEntriesReq) {
 	}
 	n.transport.ReplyAppendEntries(peer, rep)
 	return
+}
+
+func (n *Node) handlerAppendEntriesReply(a *AppendEntriesReply) {
+	if n.state.RaftState() != Leader {
+		return
+	}
+	// Leader should interpret reply
 }
 
 func (n *Node) processLogs() {
@@ -249,9 +279,7 @@ func (n *Node) handleRequestVoteReply(r *RequestVoteReply) {
 }
 
 func (n *Node) becomeCandidate() {
-	n.candidateStateLock.Lock()
-	n.candidateState = NewCandidateState()
-	n.candidateStateLock.Unlock()
+	n.candidateState.Reset()
 
 	n.state.SetRaftState(Candidate)
 	n.state.IncCurrentTerm()
@@ -269,13 +297,11 @@ func (n *Node) becomeCandidate() {
 			go n.transport.SendRequestVote(p, req)
 		}
 	}
+	n.timer.StartElectionTimer()
 }
 
 func (n *Node) becomeLeader() {
-
-	n.leaderStateLock.Lock()
-	n.leaderState = NewLeaderState(n.N)
-	n.leaderStateLock.Unlock()
+	n.leaderState.Reset()
 
 	n.state.SetRaftState(Leader)
 	n.setLeader(n.id)
@@ -285,21 +311,13 @@ func (n *Node) becomeFollower(term int) {
 	n.state.SetRaftState(Follower)
 	n.state.SetCurrentTerm(term)
 
-	n.candidateStateLock.Lock()
-	n.candidateState = nil
-	n.candidateStateLock.Unlock()
-
-	n.leaderStateLock.Lock()
-	n.leaderState = nil
-	n.leaderStateLock.Unlock()
-}
-
-func (n *Node) handlerAppendEntriesReply(a *AppendEntriesReply) {
-
+	n.candidateState.Reset()
+	n.leaderState.Reset()
 }
 
 func (n *Node) handleClientRequest(c *ClientRequest) {
 	if n.state.RaftState() != Leader {
 		return
 	}
+	// Append to log stream and process it
 }
