@@ -154,8 +154,15 @@ func (n *Node) leaderLoop() {
 
 	for n.state.RaftState() == Leader {
 		select {
-		case <-n.leaderState.incoming:
-		// Add to log and update lastlog
+		case c := <-n.leaderState.incoming:
+			log := &LogEntry{
+				command: c,
+				index:   n.state.LastLogIndex() + 1,
+				term:    n.state.CurrentTerm(),
+			}
+			n.store.AppendLog(log)
+			n.state.UpdateLastLog(log)
+			n.leaderState.UpdateMatched(matchedEntry{n.id, log.index})
 		case m := <-n.leaderState.matched:
 			n.leaderState.UpdateMatched(m)
 		case <-n.leaderState.commitCh:

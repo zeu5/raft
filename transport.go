@@ -43,6 +43,7 @@ type AppendEntriesReply struct {
 	Term      int  `json:"term"`
 	Success   bool `json:"success"`
 	LastLog   int  `json:"last_log"`
+	HeartBeat bool `json:"heartbeat"`
 }
 
 func (a *AppendEntriesReply) Marshall() []byte {

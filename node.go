@@ -159,6 +159,7 @@ func (n *Node) handleAppendEntries(a *AppendEntriesReq) {
 			Term:      term,
 			Success:   false,
 			LastLog:   lastLogIndex,
+			HeartBeat: false,
 		}
 		n.transport.ReplyAppendEntries(peer, rep)
 		return
@@ -177,6 +178,7 @@ func (n *Node) handleAppendEntries(a *AppendEntriesReq) {
 			Term:      n.state.CurrentTerm(),
 			Success:   true,
 			LastLog:   lastLogIndex,
+			HeartBeat: true,
 		}
 		n.transport.ReplyAppendEntries(peer, rep)
 		return
@@ -189,6 +191,7 @@ func (n *Node) handleAppendEntries(a *AppendEntriesReq) {
 			Term:      n.state.CurrentTerm(),
 			Success:   false,
 			LastLog:   lastLogIndex,
+			HeartBeat: false,
 		}
 		n.transport.ReplyAppendEntries(peer, rep)
 		return
@@ -217,6 +220,7 @@ func (n *Node) handleAppendEntries(a *AppendEntriesReq) {
 		Term:      n.state.CurrentTerm(),
 		Success:   true,
 		LastLog:   lastLogIndex,
+		HeartBeat: false,
 	}
 	n.transport.ReplyAppendEntries(peer, rep)
 	return
@@ -231,7 +235,9 @@ func (n *Node) handlerAppendEntriesReply(a *AppendEntriesReply) {
 		n.becomeFollower(a.Term)
 		return
 	}
-	n.leaderState.UpdateReplicationStatus(a.ReplicaID, a.Success, a.LastLog)
+	if !a.HeartBeat {
+		n.leaderState.UpdateReplicationStatus(a.ReplicaID, a.Success, a.LastLog)
+	}
 }
 
 func (n *Node) processLogs() {
@@ -362,5 +368,5 @@ func (n *Node) handleClientRequest(c *ClientRequest) {
 	if n.state.RaftState() != Leader {
 		return
 	}
-	// Append to log stream and process it
+	n.leaderState.incoming <- c.command
 }
