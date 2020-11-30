@@ -22,38 +22,43 @@ type Node struct {
 	lastContact    time.Time
 	leaderId       int
 	appendLock     *sync.Mutex
+	shutdown       chan bool
 
 	leaderState    *LeaderState
 	candidateState *CandidateState
 }
 
 func NewNode(c *Config) *Node {
-	trans := NewHTTPTransport(c)
 	timer := NewStandardTimer(c)
+	peerStore := NewPeerStore(c)
+	trans := NewHTTPTransport(c, peerStore)
 	N := len(c.Peers)
+	state := NewState(c)
 	return &Node{
-		state:          NewState(c),
+		state:          state,
 		transport:      trans,
 		incommingMsgCh: trans.ReceiveChan(),
 		store:          NewMemStore(c),
 		fsm:            NewKeyValueFSM(),
 		config:         c,
 		id:             c.CurNodeIndex,
-		peerStore:      NewPeerStore(c),
+		peerStore:      peerStore,
 		timer:          timer,
 		timeoutChan:    timer.TimerChan(),
 		N:              N,
 		lock:           new(sync.Mutex),
 		appendLock:     new(sync.Mutex),
 
-		leaderState:    NewLeaderState(N),
+		leaderState:    NewLeaderState(N, peerStore, state),
 		candidateState: NewCandidateState(),
+		shutdown:       make(chan bool),
 	}
 }
 
 func (n *Node) Run() {
 	go n.transport.Run()
 	go n.timer.Run()
+	go n.processLogs()
 
 	for {
 		select {
@@ -145,12 +150,15 @@ func (n *Node) getLeader() int {
 
 func (n *Node) handleAppendEntries(a *AppendEntriesReq) {
 	term := n.state.CurrentTerm()
+	lastLogIndex, _ := n.state.LastLog()
 	peer := n.peerStore.GetPeer(a.LeaderId)
 
 	if a.Term < term {
 		rep := &AppendEntriesReply{
-			Term:    term,
-			Success: false,
+			ReplicaID: n.id,
+			Term:      term,
+			Success:   false,
+			LastLog:   lastLogIndex,
 		}
 		n.transport.ReplyAppendEntries(peer, rep)
 		return
@@ -165,8 +173,10 @@ func (n *Node) handleAppendEntries(a *AppendEntriesReq) {
 
 	if a.Command == "" {
 		rep := &AppendEntriesReply{
-			Term:    n.state.CurrentTerm(),
-			Success: true,
+			ReplicaID: n.id,
+			Term:      n.state.CurrentTerm(),
+			Success:   true,
+			LastLog:   lastLogIndex,
 		}
 		n.transport.ReplyAppendEntries(peer, rep)
 		return
@@ -175,8 +185,10 @@ func (n *Node) handleAppendEntries(a *AppendEntriesReq) {
 	logAt := n.store.LogAt(a.PrevLogIndex)
 	if logAt == nil || logAt.term != a.PrevLogTerm {
 		rep := &AppendEntriesReply{
-			Term:    n.state.CurrentTerm(),
-			Success: false,
+			ReplicaID: n.id,
+			Term:      n.state.CurrentTerm(),
+			Success:   false,
+			LastLog:   lastLogIndex,
 		}
 		n.transport.ReplyAppendEntries(peer, rep)
 		return
@@ -196,14 +208,15 @@ func (n *Node) handleAppendEntries(a *AppendEntriesReq) {
 		term:  a.Term,
 	})
 
-	lastLogIndex, _ := n.state.LastLog()
+	lastLogIndex, _ = n.state.LastLog()
 	idx := min(a.LeaderCommit, lastLogIndex)
 	n.state.SetCommitIndex(idx)
-	go n.processLogs()
 
 	rep := &AppendEntriesReply{
-		Term:    n.state.CurrentTerm(),
-		Success: true,
+		ReplicaID: n.id,
+		Term:      n.state.CurrentTerm(),
+		Success:   true,
+		LastLog:   lastLogIndex,
 	}
 	n.transport.ReplyAppendEntries(peer, rep)
 	return
@@ -214,10 +227,39 @@ func (n *Node) handlerAppendEntriesReply(a *AppendEntriesReply) {
 		return
 	}
 	// Leader should interpret reply
+	if a.Term > n.state.CurrentTerm() {
+		n.becomeFollower(a.Term)
+		return
+	}
+	n.leaderState.UpdateReplicationStatus(a.ReplicaID, a.Success, a.LastLog)
 }
 
 func (n *Node) processLogs() {
 	// Need to apply the logs on the FSM
+	for {
+
+		lastLogApplied := n.state.LastLogApplied()
+		commitIndex := n.state.CommitIndex()
+		lla := lastLogApplied + 1
+
+		if commitIndex > lastLogApplied {
+			for _, log := range n.store.Slice(lastLogApplied+1, commitIndex) {
+				// Todo: reply to client
+				n.fsm.ApplyCommand(log.command)
+				n.state.UpdateLastLogApplied(lla)
+				lla = lla + 1
+			}
+		}
+
+		select {
+		case <-n.shutdown:
+			return
+		default:
+		}
+
+		// Todo: Parameterize this
+		time.Sleep(100 * time.Millisecond)
+	}
 }
 
 func (n *Node) appendEntry(l *LogEntry) {
@@ -232,8 +274,9 @@ func (n *Node) handleRequestVote(r *RequestVoteReq) {
 	peer := n.peerStore.GetPeer(r.CandidateId)
 
 	rep := &RequestVoteReply{
-		Term: curTerm,
-		Vote: false,
+		ReplicaID: n.id,
+		Term:      curTerm,
+		Vote:      false,
 	}
 	defer n.transport.ReplyRequestVote(peer, rep)
 
@@ -271,6 +314,7 @@ func (n *Node) handleRequestVoteReply(r *RequestVoteReply) {
 		n.becomeFollower(r.Term)
 	}
 	if r.Vote {
+		// Todo: Add vote based on replica ID
 		n.candidateState.IncVote()
 	}
 	if n.candidateState.Votes() > (n.N/2 + 1) {
@@ -311,8 +355,7 @@ func (n *Node) becomeFollower(term int) {
 	n.state.SetRaftState(Follower)
 	n.state.SetCurrentTerm(term)
 
-	n.candidateState.Reset()
-	n.leaderState.Reset()
+	n.leaderState.Stop()
 }
 
 func (n *Node) handleClientRequest(c *ClientRequest) {

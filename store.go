@@ -8,10 +8,10 @@ type LogEntry struct {
 
 type Store interface {
 	AppendLog(*LogEntry)
-	UpdateState(*State)
 	GetLogs() []*LogEntry
 	LogAt(int) *LogEntry
 	ClearFrom(int)
+	Slice(int, int) []*LogEntry
 }
 
 type MemStore struct {
@@ -33,10 +33,10 @@ func (m *MemStore) AppendLog(_ *LogEntry) {
 
 }
 
-func (m *MemStore) UpdateState(_ *State) {
+func (m *MemStore) ClearFrom(_ int) {
 
 }
 
-func (m *MemStore) ClearFrom(_ int) {
-
+func (m *MemStore) Slice(_ int, _ int) []*LogEntry {
+	return nil
 }

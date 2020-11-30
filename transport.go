@@ -39,8 +39,10 @@ func (a *AppendEntriesReq) Type() string {
 }
 
 type AppendEntriesReply struct {
-	Term    int  `json:"term"`
-	Success bool `json:"success"`
+	ReplicaID int  `json:"replica_id"`
+	Term      int  `json:"term"`
+	Success   bool `json:"success"`
+	LastLog   int  `json:"last_log"`
 }
 
 func (a *AppendEntriesReply) Marshall() []byte {
@@ -87,8 +89,9 @@ func (r *RequestVoteReq) Unmarshall(data []byte) {
 }
 
 type RequestVoteReply struct {
-	Term int  `json:"term"`
-	Vote bool `json:"vote"`
+	ReplicaID int  `json:"replica_id"`
+	Term      int  `json:"term"`
+	Vote      bool `json:"vote"`
 }
 
 func (r *RequestVoteReply) Type() string {

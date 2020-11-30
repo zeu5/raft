@@ -12,13 +12,6 @@ type Config struct {
 	CurNodeIndex     int           `json:"cur_node_id"`
 }
 
-func DefaultConfig() *Config {
-	return &Config{
-		HeartbeatTimeout: 1000 * time.Millisecond,
-		ElectionTimeout:  1000 * time.Millisecond,
-	}
-}
-
 func ConfigFromJson(s []byte) *Config {
 	c := &Config{}
 	if err := json.Unmarshal(s, c); err != nil {

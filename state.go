@@ -80,6 +80,12 @@ func (s *State) UpdateLastLog(l *LogEntry) {
 	s.lastLogTerm = l.term
 }
 
+func (s *State) LastLogIndex() int {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	return s.lastLogIndex
+}
+
 func (s *State) CommitIndex() int {
 	s.lock.Lock()
 	defer s.lock.Unlock()
@@ -131,26 +137,6 @@ func NewState(_ *Config) *State {
 		lastVoteCandidate: -1,
 		lastVoteTerm:      -1,
 	}
-}
-
-type LeaderState struct {
-	nextIndex []int
-	size      int
-	lock      *sync.Mutex
-}
-
-func NewLeaderState(size int) *LeaderState {
-	return &LeaderState{
-		nextIndex: make([]int, size),
-		size:      size,
-		lock:      new(sync.Mutex),
-	}
-}
-
-func (l *LeaderState) Reset() {
-	l.lock.Lock()
-	defer l.lock.Unlock()
-	l.nextIndex = make([]int, l.size)
 }
 
 type CandidateState struct {

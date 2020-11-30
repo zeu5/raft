@@ -3,12 +3,14 @@ package main
 import "net/http"
 
 type HTTPTransport struct {
-	recvChan chan Message
+	recvChan  chan Message
+	peerStore *PeerStore
 }
 
-func NewHTTPTransport(_ *Config) *HTTPTransport {
+func NewHTTPTransport(_ *Config, p *PeerStore) *HTTPTransport {
 	return &HTTPTransport{
-		make(chan Message, 100),
+		recvChan:  make(chan Message, 100),
+		peerStore: p,
 	}
 }
 
