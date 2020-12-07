@@ -1,6 +1,7 @@
-package main
+package raft
 
 import (
+	"log"
 	"sync"
 	"time"
 )
@@ -29,9 +30,9 @@ type Node struct {
 }
 
 func NewNode(c *Config) *Node {
-	timer := NewStandardTimer(c)
 	peerStore := NewPeerStore(c)
 	trans := NewHTTPTransport(c, peerStore)
+	timer := NewControlledTimer(c, trans)
 	N := len(c.Peers)
 	state := NewState(c)
 	return &Node{
@@ -94,8 +95,9 @@ func (n *Node) leaderTimeout() {
 		return
 	}
 	req := &AppendEntriesReq{
-		Term:     n.state.CurrentTerm(),
-		LeaderId: n.id,
+		Term:         n.state.CurrentTerm(),
+		LeaderId:     n.id,
+		LeaderCommit: n.state.CommitIndex(),
 	}
 
 	for id, p := range n.peerStore.AllPeers() {
@@ -172,44 +174,36 @@ func (n *Node) handleAppendEntries(a *AppendEntriesReq) {
 	n.setLastContact()
 	n.setLeader(a.LeaderId)
 
-	if a.Command == "" {
-		rep := &AppendEntriesReply{
-			ReplicaID: n.id,
-			Term:      n.state.CurrentTerm(),
-			Success:   true,
-			LastLog:   lastLogIndex,
-			HeartBeat: true,
+	if a.PrevLogIndex > 0 {
+		logAt := n.store.LogAt(a.PrevLogIndex)
+		if logAt == nil || logAt.term != a.PrevLogTerm {
+			rep := &AppendEntriesReply{
+				ReplicaID: n.id,
+				Term:      n.state.CurrentTerm(),
+				Success:   false,
+				LastLog:   lastLogIndex,
+				HeartBeat: false,
+			}
+			n.transport.ReplyAppendEntries(peer, rep)
+			return
 		}
-		n.transport.ReplyAppendEntries(peer, rep)
-		return
 	}
 
-	logAt := n.store.LogAt(a.PrevLogIndex)
-	if logAt == nil || logAt.term != a.PrevLogTerm {
-		rep := &AppendEntriesReply{
-			ReplicaID: n.id,
-			Term:      n.state.CurrentTerm(),
-			Success:   false,
-			LastLog:   lastLogIndex,
-			HeartBeat: false,
+	if a.Command != "" {
+		newIndex := a.PrevLogIndex + 1
+		logAt := n.store.LogAt(newIndex)
+		if logAt != nil && logAt.term != a.Term {
+			n.store.ClearFrom(a.PrevLogIndex)
 		}
-		n.transport.ReplyAppendEntries(peer, rep)
-		return
-	}
 
-	newIndex := a.PrevLogIndex + 1
-	logAt = n.store.LogAt(newIndex)
-	if logAt != nil && logAt.term != a.Term {
-		n.store.ClearFrom(a.PrevLogIndex)
+		n.appendEntry(&LogEntry{
+			command: &Command{
+				data: []byte(a.Command),
+			},
+			index: newIndex,
+			term:  a.Term,
+		})
 	}
-
-	n.appendEntry(&LogEntry{
-		command: &Command{
-			data: []byte(a.Command),
-		},
-		index: newIndex,
-		term:  a.Term,
-	})
 
 	lastLogIndex, _ = n.state.LastLog()
 	idx := min(a.LeaderCommit, lastLogIndex)
@@ -220,7 +214,7 @@ func (n *Node) handleAppendEntries(a *AppendEntriesReq) {
 		Term:      n.state.CurrentTerm(),
 		Success:   true,
 		LastLog:   lastLogIndex,
-		HeartBeat: false,
+		HeartBeat: a.Command == "",
 	}
 	n.transport.ReplyAppendEntries(peer, rep)
 	return
@@ -323,12 +317,13 @@ func (n *Node) handleRequestVoteReply(r *RequestVoteReply) {
 		// Todo: Add vote based on replica ID
 		n.candidateState.IncVote()
 	}
-	if n.candidateState.Votes() > (n.N/2 + 1) {
+	if n.candidateState.Votes() >= (n.N/2 + 1) {
 		n.becomeLeader()
 	}
 }
 
 func (n *Node) becomeCandidate() {
+	log.Printf("Becoming candidate\n")
 	n.candidateState.Reset()
 
 	n.state.SetRaftState(Candidate)
@@ -351,22 +346,27 @@ func (n *Node) becomeCandidate() {
 }
 
 func (n *Node) becomeLeader() {
+	log.Printf("Becoming leader\n")
 	n.leaderState.Reset()
 
 	n.state.SetRaftState(Leader)
 	n.setLeader(n.id)
+	n.timer.RestartHeartbeat()
+	go n.leaderLoop()
 }
 
 func (n *Node) becomeFollower(term int) {
+	log.Printf("Becoming follower\n")
 	n.state.SetRaftState(Follower)
 	n.state.SetCurrentTerm(term)
 
 	n.leaderState.Stop()
+	n.timer.RestartHeartbeat()
 }
 
 func (n *Node) handleClientRequest(c *ClientRequest) {
 	if n.state.RaftState() != Leader {
 		return
 	}
-	n.leaderState.incoming <- c.command
+	n.leaderState.incoming <- &Command{data: []byte(c.Command)}
 }

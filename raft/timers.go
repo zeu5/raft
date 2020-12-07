@@ -1,6 +1,8 @@
-package main
+package raft
 
-import "time"
+import (
+	"time"
+)
 
 type Timeout struct {
 	Type string
@@ -9,6 +11,7 @@ type Timeout struct {
 type Timers interface {
 	TimerChan() <-chan *Timeout
 	StartElectionTimer()
+	RestartHeartbeat()
 	Run()
 }
 
@@ -50,6 +53,11 @@ func (t *StandardTimer) TimerChan() <-chan *Timeout {
 func (t *StandardTimer) StartElectionTimer() {
 	extra := time.Duration(time.Duration(randomInt()) % t.electionTimeout)
 	t.electionTimer = time.After(t.electionTimeout + extra)
+}
+
+func (t *StandardTimer) RestartHeartbeat() {
+	t.restartHeartbeat()
+	t.restartLeaderHeartbeat()
 }
 
 func (t *StandardTimer) restartHeartbeat() {

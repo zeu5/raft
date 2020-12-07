@@ -3,6 +3,8 @@ package main
 import (
 	"flag"
 	"io/ioutil"
+
+	"github.com/zeu5/raft/raft"
 )
 
 var master *bool = flag.Bool("master", false, "Decides to run the node as a master node")
@@ -18,12 +20,12 @@ func openConfFile(path string) []byte {
 
 func main() {
 	flag.Parse()
-	config := ConfigFromJson(openConfFile(*config))
+	config := raft.ConfigFromJson(openConfFile(*config))
 	if *master {
-		m := NewMaster(config)
+		m := raft.NewMaster(config)
 		m.Run()
 	} else {
-		n := NewNode(config)
+		n := raft.NewNode(config)
 		n.Run()
 	}
 }

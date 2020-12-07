@@ -1,6 +1,0 @@
-{
-    "heartbeat_timeout": 150,
-    "election_timeout": 150,
-    "peers" : ["one", "two", "three"],
-    "cur_node_id": 1
-}

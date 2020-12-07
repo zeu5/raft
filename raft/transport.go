@@ -1,4 +1,4 @@
-package main
+package raft
 
 import (
 	"encoding/json"
@@ -7,8 +7,8 @@ import (
 
 type Message interface {
 	Type() string
-	Marshall() []byte
-	Unmarshall([]byte)
+	Marshal() []byte
+	Unmarshal([]byte)
 }
 
 type AppendEntriesReq struct {
@@ -20,7 +20,7 @@ type AppendEntriesReq struct {
 	LeaderCommit int    `json:"leader_commit"`
 }
 
-func (a *AppendEntriesReq) Marshall() []byte {
+func (a *AppendEntriesReq) Marshal() []byte {
 	res, err := json.Marshal(a)
 	if err != nil {
 		fmt.Errorf("Could not marshall req")
@@ -28,7 +28,7 @@ func (a *AppendEntriesReq) Marshall() []byte {
 	return res
 }
 
-func (a *AppendEntriesReq) Unmarshall(data []byte) {
+func (a *AppendEntriesReq) Unmarshal(data []byte) {
 	if err := json.Unmarshal(data, a); err != nil {
 		fmt.Errorf("Failed to unmarshall")
 	}
@@ -46,7 +46,7 @@ type AppendEntriesReply struct {
 	HeartBeat bool `json:"heartbeat"`
 }
 
-func (a *AppendEntriesReply) Marshall() []byte {
+func (a *AppendEntriesReply) Marshal() []byte {
 	res, err := json.Marshal(a)
 	if err != nil {
 		fmt.Errorf("Could not marshall req")
@@ -54,7 +54,7 @@ func (a *AppendEntriesReply) Marshall() []byte {
 	return res
 }
 
-func (a *AppendEntriesReply) Unmarshall(data []byte) {
+func (a *AppendEntriesReply) Unmarshal(data []byte) {
 	if err := json.Unmarshal(data, a); err != nil {
 		fmt.Errorf("Failed to unmarshall")
 	}
@@ -75,7 +75,7 @@ func (r *RequestVoteReq) Type() string {
 	return "RequestVoteReq"
 }
 
-func (r *RequestVoteReq) Marshall() []byte {
+func (r *RequestVoteReq) Marshal() []byte {
 	res, err := json.Marshal(r)
 	if err != nil {
 		fmt.Errorf("Could not marshall req")
@@ -83,7 +83,7 @@ func (r *RequestVoteReq) Marshall() []byte {
 	return res
 }
 
-func (r *RequestVoteReq) Unmarshall(data []byte) {
+func (r *RequestVoteReq) Unmarshal(data []byte) {
 	if err := json.Unmarshal(data, r); err != nil {
 		fmt.Errorf("Failed to unmarshall")
 	}
@@ -99,7 +99,7 @@ func (r *RequestVoteReply) Type() string {
 	return "RequestVoteReply"
 }
 
-func (r *RequestVoteReply) Marshall() []byte {
+func (r *RequestVoteReply) Marshal() []byte {
 	res, err := json.Marshal(r)
 	if err != nil {
 		fmt.Errorf("Could not marshall req")
@@ -107,22 +107,21 @@ func (r *RequestVoteReply) Marshall() []byte {
 	return res
 }
 
-func (r *RequestVoteReply) Unmarshall(data []byte) {
+func (r *RequestVoteReply) Unmarshal(data []byte) {
 	if err := json.Unmarshal(data, r); err != nil {
 		fmt.Errorf("Failed to unmarshall")
 	}
 }
 
 type ClientRequest struct {
-	ClientAddr string
-	command    *Command
+	Command string `json:"command"`
 }
 
 func (r *ClientRequest) Type() string {
 	return "ClientRequest"
 }
 
-func (r *ClientRequest) Marshall() []byte {
+func (r *ClientRequest) Marshal() []byte {
 	res, err := json.Marshal(r)
 	if err != nil {
 		fmt.Errorf("Could not marshall req")
@@ -130,7 +129,7 @@ func (r *ClientRequest) Marshall() []byte {
 	return res
 }
 
-func (r *ClientRequest) Unmarshall(data []byte) {
+func (r *ClientRequest) Unmarshal(data []byte) {
 	if err := json.Unmarshal(data, r); err != nil {
 		fmt.Errorf("Failed to unmarshall")
 	}

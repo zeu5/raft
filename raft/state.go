@@ -1,6 +1,8 @@
-package main
+package raft
 
-import "sync"
+import (
+	"sync"
+)
 
 type RaftState int
 
@@ -95,7 +97,9 @@ func (s *State) CommitIndex() int {
 func (s *State) SetCommitIndex(i int) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
-	s.commitIndex = i
+	if i > s.commitIndex {
+		s.commitIndex = i
+	}
 }
 
 func (s *State) LastLogApplied() int {

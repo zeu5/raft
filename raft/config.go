@@ -1,4 +1,4 @@
-package main
+package raft
 
 import (
 	"encoding/json"
@@ -10,6 +10,7 @@ type Config struct {
 	ElectionTimeout  time.Duration `json:"election_timeout"`
 	Peers            []string      `json:"peers"`
 	CurNodeIndex     int           `json:"cur_node_id"`
+	MasterAddr       string        `json:"master_addr"`
 }
 
 func ConfigFromJson(s []byte) *Config {

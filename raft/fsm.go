@@ -1,4 +1,4 @@
-package main
+package raft
 
 import (
 	"encoding/json"
@@ -22,7 +22,7 @@ type KeyValueCommand struct {
 func (c *KeyValueCommand) Marshal() []byte {
 	v, err := json.Marshal(c)
 	if err != nil {
-		fmt.Errorf("Could not marshall command")
+		panic(fmt.Errorf("Could not marshall command"))
 	}
 	return v
 }
@@ -30,7 +30,7 @@ func (c *KeyValueCommand) Marshal() []byte {
 func (c *KeyValueCommand) Unmarshal(s []byte) {
 	err := json.Unmarshal(s, c)
 	if err != nil {
-		fmt.Errorf("Could not unmarshall command")
+		panic(fmt.Errorf("Could not unmarshall command"))
 	}
 }
 
@@ -45,6 +45,9 @@ func NewKeyValueFSM() *KeyValueFSM {
 }
 
 func (k *KeyValueFSM) ApplyCommand(c *Command) string {
+	if string(c.data) == "no-op" {
+		return ""
+	}
 	command := &KeyValueCommand{}
 	command.Unmarshal(c.data)
 

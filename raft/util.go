@@ -1,4 +1,4 @@
-package main
+package raft
 
 import (
 	crand "crypto/rand"
@@ -20,6 +20,10 @@ func randomInt() int64 {
 	return rand.Int63()
 }
 
+func randIntn(n int) int {
+	return rand.Intn(n)
+}
+
 func min(a, b int) int {
 	if a <= b {
 		return a
@@ -32,4 +36,10 @@ func max(a, b int) int {
 		return b
 	}
 	return a
+}
+
+func asyncNotify(s chan struct{}) {
+	go func() {
+		s <- struct{}{}
+	}()
 }
