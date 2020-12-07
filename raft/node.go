@@ -32,7 +32,7 @@ type Node struct {
 func NewNode(c *Config) *Node {
 	peerStore := NewPeerStore(c)
 	trans := NewHTTPTransport(c, peerStore)
-	timer := NewControlledTimer(c, trans)
+	timer := NewStandardTimer(c) //NewControlledTimer(c, trans)
 	N := len(c.Peers)
 	state := NewState(c)
 	return &Node{

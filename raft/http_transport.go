@@ -15,6 +15,7 @@ type HTTPTransport struct {
 	masterAddr  string
 	timeoutChan chan *TimeoutMessage
 	id          int
+	slave       bool
 }
 
 type TransportMessage struct {
@@ -29,6 +30,7 @@ func NewHTTPTransport(c *Config, p *PeerStore) *HTTPTransport {
 		serverAddr: c.Peers[c.CurNodeIndex],
 		masterAddr: c.MasterAddr,
 		id:         c.CurNodeIndex,
+		slave:      c.Slave,
 	}
 }
 
@@ -77,14 +79,13 @@ func (t *HTTPTransport) SendTimeout(m *TimeoutMessage) {
 }
 
 func (t *HTTPTransport) sendMasterMsg(to int, m Message) error {
-	tm := TransportMessage{
-		Type:    m.Type(),
-		Message: string(m.Marshal()),
-	}
 	body, err := json.Marshal(&MessageWrapper{
 		From: t.id,
 		To:   to,
-		M:    tm,
+		M: TransportMessage{
+			Type:    m.Type(),
+			Message: string(m.Marshal()),
+		},
 	})
 	if err != nil {
 		return fmt.Errorf("Could not format message to master %s", err)
@@ -102,18 +103,6 @@ func (t *HTTPTransport) ReceiveChan() <-chan Message {
 	return t.recvChan
 }
 
-func (t *HTTPTransport) prepareBody(m Message) []byte {
-	body, err := json.Marshal(&TransportMessage{
-		Type:    m.Type(),
-		Message: string(m.Marshal()),
-	})
-	if err != nil {
-		fmt.Printf("Could not marshall message %s\n", err)
-		return nil
-	}
-	return body
-}
-
 func (t *HTTPTransport) sendMsg(addr string, body []byte) error {
 	// log.Printf("Sending message %#v to %#v\n", r, p)
 	url := "http://" + addr
@@ -129,20 +118,35 @@ func (t *HTTPTransport) sendMsg(addr string, body []byte) error {
 	return nil
 }
 
+func (t *HTTPTransport) SendMsg(p *Peer, m Message) error {
+	if t.slave {
+		return t.sendMasterMsg(p.id, m)
+	}
+
+	body, err := json.Marshal(&TransportMessage{
+		Type:    m.Type(),
+		Message: string(m.Marshal()),
+	})
+	if err != nil {
+		return fmt.Errorf("Could not marshall message %s", err)
+	}
+	return t.sendMsg(p.addr, body)
+}
+
 func (t *HTTPTransport) SendAppendEntries(p *Peer, r *AppendEntriesReq) error {
-	return t.sendMsg(p.addr, t.prepareBody(r))
+	return t.SendMsg(p, r)
 }
 
 func (t *HTTPTransport) SendRequestVote(p *Peer, r *RequestVoteReq) error {
-	return t.sendMsg(p.addr, t.prepareBody(r))
+	return t.SendMsg(p, r)
 }
 
 func (t *HTTPTransport) ReplyAppendEntries(p *Peer, r *AppendEntriesReply) error {
-	return t.sendMsg(p.addr, t.prepareBody(r))
+	return t.SendMsg(p, r)
 }
 
 func (t *HTTPTransport) ReplyRequestVote(p *Peer, r *RequestVoteReply) error {
-	return t.sendMsg(p.addr, t.prepareBody(r))
+	return t.SendMsg(p, r)
 }
 
 func (t *HTTPTransport) ReplyClient(addr, msg string) {

@@ -23,9 +23,10 @@ type Master struct {
 }
 
 func NewMaster(c *Config) *Master {
-	ctr := NewTimeoutController(c)
+	peers := NewPeerStore(c)
+	ctr := NewPCTFileController(c)
 	return &Master{
-		peers:      NewPeerStore(c),
+		peers:      peers,
 		controller: ctr,
 		recvChan:   ctr.ReceiveChan(),
 		serverAddr: c.MasterAddr,

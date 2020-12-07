@@ -11,6 +11,9 @@ type Config struct {
 	Peers            []string      `json:"peers"`
 	CurNodeIndex     int           `json:"cur_node_id"`
 	MasterAddr       string        `json:"master_addr"`
+	Slave            bool          `json:"slave"`
+
+	PCTWorkingDir string `json:"pct_working_dir`
 }
 
 func ConfigFromJson(s []byte) *Config {
