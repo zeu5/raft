@@ -1,7 +1,9 @@
 package raft
 
 import (
+	"context"
 	"log"
+	"net/http"
 	"sync"
 	"time"
 )
@@ -20,7 +22,7 @@ type Node struct {
 	clientRequests chan *ClientRequest
 	N              int
 	lock           *sync.Mutex
-	lastContact    time.Time
+	lastContact    bool
 	leaderId       int
 	appendLock     *sync.Mutex
 	shutdown       chan bool
@@ -32,7 +34,7 @@ type Node struct {
 func NewNode(c *Config) *Node {
 	peerStore := NewPeerStore(c)
 	trans := NewHTTPTransport(c, peerStore)
-	timer := NewStandardTimer(c) //NewControlledTimer(c, trans)
+	timer := NewControlledTimer(c, trans) //NewStandardTimer(c)
 	N := len(c.Peers)
 	state := NewState(c)
 	return &Node{
@@ -49,6 +51,7 @@ func NewNode(c *Config) *Node {
 		N:              N,
 		lock:           new(sync.Mutex),
 		appendLock:     new(sync.Mutex),
+		lastContact:    false,
 
 		leaderState:    NewLeaderState(N, peerStore, state),
 		candidateState: NewCandidateState(),
@@ -56,8 +59,18 @@ func NewNode(c *Config) *Node {
 	}
 }
 
-func (n *Node) Run() {
-	go n.transport.Run()
+func (n *Node) Run(ctx context.Context) {
+
+	nCtx, cancel := context.WithCancel(context.Background())
+	stopChan := make(chan struct{}, 1)
+
+	go func() {
+		<-ctx.Done()
+		cancel()
+		stopChan <- struct{}{}
+	}()
+
+	go n.transport.Run(nCtx)
 	go n.timer.Run()
 	go n.processLogs()
 
@@ -80,17 +93,19 @@ func (n *Node) Run() {
 		case t := <-n.timeoutChan:
 			switch t.Type {
 			case "HeartbeatTimeout":
-				go n.heartbeat()
+				go n.heartbeat(t)
 			case "ElectionTimeout":
-				go n.electionTimeout()
+				go n.electionTimeout(t)
 			case "LeaderTimeout":
-				go n.leaderTimeout()
+				go n.leaderTimeout(t)
 			}
+		case <-stopChan:
+			break
 		}
 	}
 }
 
-func (n *Node) leaderTimeout() {
+func (n *Node) leaderTimeout(_ *Timeout) {
 	if n.state.RaftState() != Leader {
 		return
 	}
@@ -107,35 +122,37 @@ func (n *Node) leaderTimeout() {
 	}
 }
 
-func (n *Node) electionTimeout() {
+func (n *Node) electionTimeout(_ *Timeout) {
 	if n.state.RaftState() != Candidate {
 		return
 	}
 	n.becomeCandidate()
 }
 
-func (n *Node) heartbeat() {
+func (n *Node) heartbeat(t *Timeout) {
 	if n.state.RaftState() != Follower {
 		return
 	}
+	// log.Printf("Heartbeat timeout of %d\n", t.Millis)
 	lastContact := n.getLastContact()
 
-	if time.Now().Sub(lastContact) < n.config.HeartbeatTimeout {
+	if lastContact {
+		n.setLastContact(false)
 		return
 	}
 	n.becomeCandidate()
 }
 
-func (n *Node) getLastContact() time.Time {
+func (n *Node) getLastContact() bool {
 	n.lock.Lock()
 	defer n.lock.Unlock()
 	return n.lastContact
 }
 
-func (n *Node) setLastContact() {
+func (n *Node) setLastContact(v bool) {
 	n.lock.Lock()
 	defer n.lock.Unlock()
-	n.lastContact = time.Now()
+	n.lastContact = v
 }
 
 func (n *Node) setLeader(leaderId int) {
@@ -167,11 +184,11 @@ func (n *Node) handleAppendEntries(a *AppendEntriesReq) {
 		return
 	}
 
-	if a.Term > term && n.state.RaftState() != Follower {
+	if a.Term > term || n.state.RaftState() != Follower {
 		n.becomeFollower(a.Term)
 	}
 
-	n.setLastContact()
+	n.setLastContact(true)
 	n.setLeader(a.LeaderId)
 
 	if a.PrevLogIndex > 0 {
@@ -227,6 +244,7 @@ func (n *Node) handlerAppendEntriesReply(a *AppendEntriesReply) {
 	// Leader should interpret reply
 	if a.Term > n.state.CurrentTerm() {
 		n.becomeFollower(a.Term)
+		n.setLastContact(true)
 		return
 	}
 	if !a.HeartBeat {
@@ -243,7 +261,8 @@ func (n *Node) processLogs() {
 		lla := lastLogApplied + 1
 
 		if commitIndex > lastLogApplied {
-			for _, log := range n.store.Slice(lastLogApplied+1, commitIndex) {
+			slice := n.store.Slice(lastLogApplied+1, commitIndex)
+			for _, log := range slice {
 				// Todo: reply to client
 				n.fsm.ApplyCommand(log.command)
 				n.state.UpdateLastLogApplied(lla)
@@ -277,6 +296,7 @@ func (n *Node) handleRequestVote(r *RequestVoteReq) {
 		ReplicaID: n.id,
 		Term:      curTerm,
 		Vote:      false,
+		ForTerm:   r.Term,
 	}
 	defer n.transport.ReplyRequestVote(peer, rep)
 
@@ -302,7 +322,8 @@ func (n *Node) handleRequestVote(r *RequestVoteReq) {
 
 	n.state.SetLastVote(r.CandidateId, r.Term)
 	rep.Vote = true
-	n.setLastContact()
+	n.timer.RestartHeartbeat()
+	n.setLastContact(false)
 	return
 }
 
@@ -310,10 +331,11 @@ func (n *Node) handleRequestVoteReply(r *RequestVoteReply) {
 	if n.state.RaftState() != Candidate {
 		return
 	}
-	if r.Term > n.state.CurrentTerm() {
+	curTerm := n.state.CurrentTerm()
+	if r.Term > curTerm {
 		n.becomeFollower(r.Term)
 	}
-	if r.Vote {
+	if r.Vote && r.ForTerm == curTerm {
 		// Todo: Add vote based on replica ID
 		n.candidateState.IncVote()
 	}
@@ -327,11 +349,14 @@ func (n *Node) becomeCandidate() {
 	n.candidateState.Reset()
 
 	n.state.SetRaftState(Candidate)
+	n.setLeader(-1)
 	n.state.IncCurrentTerm()
 
 	lastIndex, lastTerm := n.state.LastLog()
+	curTerm := n.state.CurrentTerm()
+	n.state.SetLastVote(n.id, curTerm)
 	req := &RequestVoteReq{
-		Term:         n.state.CurrentTerm(),
+		Term:         curTerm,
 		CandidateId:  n.id,
 		LastLogIndex: lastIndex,
 		LastLogTerm:  lastTerm,
@@ -352,6 +377,7 @@ func (n *Node) becomeLeader() {
 	n.state.SetRaftState(Leader)
 	n.setLeader(n.id)
 	n.timer.RestartHeartbeat()
+	go n.informMaster()
 	go n.leaderLoop()
 }
 
@@ -366,7 +392,15 @@ func (n *Node) becomeFollower(term int) {
 
 func (n *Node) handleClientRequest(c *ClientRequest) {
 	if n.state.RaftState() != Leader {
+		c.resp <- &ClientResponse{
+			text:       "Not leader",
+			statuscode: http.StatusBadRequest,
+		}
 		return
 	}
 	n.leaderState.incoming <- &Command{data: []byte(c.Command)}
+	c.resp <- &ClientResponse{
+		text:       "OK",
+		statuscode: http.StatusOK,
+	}
 }

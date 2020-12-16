@@ -34,33 +34,41 @@ type TimeoutTransport interface {
 }
 
 type ControlledTimer struct {
-	transport         TimeoutTransport
-	outChan           chan *Timeout
-	inChan            chan *TimeoutMessage
-	heartBeat         time.Duration
-	election          time.Duration
-	HeartbeatTerm     int
-	ElectionTerm      int
-	heartbeatTermLock *sync.Mutex
-	electionTermLock  *sync.Mutex
-	HeartbeatTimeout  int64
-	ElectionTimeout   int64
+	transport              TimeoutTransport
+	outChan                chan *Timeout
+	inChan                 chan *TimeoutMessage
+	heartBeat              time.Duration
+	election               time.Duration
+	HeartbeatTerm          int
+	ElectionTerm           int
+	heartbeatTermLock      *sync.Mutex
+	electionTermLock       *sync.Mutex
+	HeartbeatTimeout       int64
+	ElectionTimeout        int64
+	leaderCounter          int
+	heartbeatCounter       int
+	electionTimeoutCounter int
+	counterLock            *sync.Mutex
 }
 
 func NewControlledTimer(c *Config, trans TimeoutTransport) *ControlledTimer {
-	return &ControlledTimer{
-		transport:         trans,
-		outChan:           make(chan *Timeout, 10),
-		inChan:            trans.TimeoutRecvChan(),
-		heartBeat:         c.HeartbeatTimeout,
-		election:          c.ElectionTimeout,
-		HeartbeatTerm:     0,
-		heartbeatTermLock: new(sync.Mutex),
-		ElectionTerm:      0,
-		electionTermLock:  new(sync.Mutex),
-		HeartbeatTimeout:  c.HeartbeatTimeout.Milliseconds(),
-		ElectionTimeout:   c.ElectionTimeout.Milliseconds(),
+	timer := &ControlledTimer{
+		transport:              trans,
+		outChan:                make(chan *Timeout, 10),
+		inChan:                 trans.TimeoutRecvChan(),
+		heartBeat:              c.HeartbeatTimeout,
+		election:               c.ElectionTimeout,
+		HeartbeatTerm:          0,
+		heartbeatTermLock:      new(sync.Mutex),
+		ElectionTerm:           0,
+		electionTermLock:       new(sync.Mutex),
+		HeartbeatTimeout:       c.HeartbeatTimeout.Milliseconds(),
+		ElectionTimeout:        c.ElectionTimeout.Milliseconds(),
+		leaderCounter:          0,
+		heartbeatCounter:       0,
+		electionTimeoutCounter: 0,
 	}
+	return timer
 }
 
 func (c *ControlledTimer) TimerChan() <-chan *Timeout {
@@ -70,7 +78,12 @@ func (c *ControlledTimer) TimerChan() <-chan *Timeout {
 func (c *ControlledTimer) sendHeartbeat() {
 	c.heartbeatTermLock.Lock()
 	term := c.HeartbeatTerm
+	count := c.heartbeatCounter
+	c.heartbeatCounter = c.heartbeatCounter + 1
 	c.heartbeatTermLock.Unlock()
+
+	if count > 5 {
+	}
 
 	c.transport.SendTimeout(&TimeoutMessage{
 		Time: c.HeartbeatTimeout,
@@ -82,7 +95,12 @@ func (c *ControlledTimer) sendHeartbeat() {
 func (c *ControlledTimer) sendLeaderbeat() {
 	c.heartbeatTermLock.Lock()
 	term := c.HeartbeatTerm
+	count := c.leaderCounter
+	c.leaderCounter = c.leaderCounter + 1
 	c.heartbeatTermLock.Unlock()
+
+	if count > 10 {
+	}
 
 	c.transport.SendTimeout(&TimeoutMessage{
 		Time: c.HeartbeatTimeout / 10,
@@ -104,29 +122,31 @@ func (c *ControlledTimer) checkElectionTerm(t int) bool {
 }
 
 func (c *ControlledTimer) Run() {
-	for {
-		select {
-		case m := <-c.inChan:
-			switch m.T {
-			case "HeartbeatTimeout":
+	c.sendHeartbeat()
+	c.sendLeaderbeat()
+	for m := range c.inChan {
+		switch m.T {
+		case "HeartbeatTimeout":
+			if c.checkHeartbeatTerm(m.Term) {
 				go c.sendHeartbeat()
-				if c.checkHeartbeatTerm(m.Term) {
-					c.outChan <- &Timeout{
-						Type: "HeartbeatTimeout",
-					}
+				c.outChan <- &Timeout{
+					Type:   "HeartbeatTimeout",
+					Millis: m.Time,
 				}
-			case "ElectionTimeout":
-				if c.checkElectionTerm(m.Term) {
-					c.outChan <- &Timeout{
-						Type: "ElectionTimeout",
-					}
+			}
+		case "ElectionTimeout":
+			if c.checkElectionTerm(m.Term) {
+				c.outChan <- &Timeout{
+					Type:   "ElectionTimeout",
+					Millis: m.Time,
 				}
-			case "LeaderTimeout":
+			}
+		case "LeaderTimeout":
+			if c.checkHeartbeatTerm(m.Term) {
 				go c.sendLeaderbeat()
-				if c.checkHeartbeatTerm(m.Term) {
-					c.outChan <- &Timeout{
-						Type: "LeaderTimeout",
-					}
+				c.outChan <- &Timeout{
+					Type:   "LeaderTimeout",
+					Millis: m.Time,
 				}
 			}
 		}
@@ -146,7 +166,12 @@ func (c *ControlledTimer) StartElectionTimer() {
 	c.electionTermLock.Lock()
 	c.ElectionTerm = c.ElectionTerm + 1
 	term := c.ElectionTerm
+	count := c.electionTimeoutCounter
+	c.electionTimeoutCounter = c.electionTimeoutCounter + 1
 	c.electionTermLock.Unlock()
+
+	if count > 5 {
+	}
 
 	c.transport.SendTimeout(&TimeoutMessage{
 		Time: c.ElectionTimeout,

@@ -50,6 +50,7 @@ func (k *KeyValueFSM) ApplyCommand(c *Command) string {
 	}
 	command := &KeyValueCommand{}
 	command.Unmarshal(c.data)
+	fmt.Printf("Applying command %s\n", string(c.data))
 
 	switch command.Op {
 	case "Get":

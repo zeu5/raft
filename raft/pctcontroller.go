@@ -2,6 +2,7 @@ package raft
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -47,8 +48,12 @@ func (pctFile *PCTFile) NotifyMessage(message *MessageWrapper) {
 	pctFile.lock.Lock()
 	id := pctFile.messageCounter
 	pctFile.messagePool[id] = message
+	message.ID = int(id)
 	pctFile.messageCounter = pctFile.messageCounter + 1
 	pctFile.lock.Unlock()
+
+	b, _ := json.Marshal(message)
+	log.Printf("Received: %s\n", b)
 
 	pctFile.fileInterface.WriteMessage(message, id)
 }
@@ -57,13 +62,23 @@ func (p *PCTFile) ackmonitor() {
 	for {
 		select {
 		case id := <-p.ackChan:
+			var m *MessageWrapper
+			send := false
 			p.lock.Lock()
-			m, ok := p.messagePool[id]
+			msg, ok := p.messagePool[id]
 			if ok {
-				p.dispatchChan <- m
+				m = msg
+				send = true
 				delete(p.messagePool, id)
 			}
 			p.lock.Unlock()
+
+			if send {
+				p.dispatchChan <- m
+				if b, err := json.Marshal(m); err == nil {
+					log.Printf("Sending: %s\n", b)
+				}
+			}
 		}
 	}
 }

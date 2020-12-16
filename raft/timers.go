@@ -5,7 +5,8 @@ import (
 )
 
 type Timeout struct {
-	Type string
+	Type   string
+	Millis int64
 }
 
 type Timers interface {
@@ -78,16 +79,19 @@ func (t *StandardTimer) Run() {
 		case _ = <-t.heartbeatTimer:
 			t.restartHeartbeat()
 			t.outChan <- &Timeout{
-				Type: "HeartbeatTimeout",
+				Type:   "HeartbeatTimeout",
+				Millis: t.heartbeatTimeout.Milliseconds(),
 			}
 		case _ = <-t.electionTimer:
 			t.outChan <- &Timeout{
-				Type: "ElectionTimeout",
+				Type:   "ElectionTimeout",
+				Millis: t.electionTimeout.Milliseconds(),
 			}
 		case _ = <-t.leaderTimer:
 			t.restartLeaderHeartbeat()
 			t.outChan <- &Timeout{
-				Type: "LeaderTimeout",
+				Type:   "LeaderTimeout",
+				Millis: (t.heartbeatTimeout / 10).Milliseconds(),
 			}
 		default:
 		}

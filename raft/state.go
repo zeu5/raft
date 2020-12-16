@@ -1,6 +1,7 @@
 package raft
 
 import (
+	"log"
 	"sync"
 )
 
@@ -98,6 +99,7 @@ func (s *State) SetCommitIndex(i int) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	if i > s.commitIndex {
+		log.Printf("Updaing commit index to %d\n", i)
 		s.commitIndex = i
 	}
 }

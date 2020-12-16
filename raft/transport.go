@@ -1,6 +1,7 @@
 package raft
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 )
@@ -93,6 +94,7 @@ type RequestVoteReply struct {
 	ReplicaID int  `json:"replica_id"`
 	Term      int  `json:"term"`
 	Vote      bool `json:"vote"`
+	ForTerm   int  `json:"for_term"`
 }
 
 func (r *RequestVoteReply) Type() string {
@@ -115,6 +117,12 @@ func (r *RequestVoteReply) Unmarshal(data []byte) {
 
 type ClientRequest struct {
 	Command string `json:"command"`
+	resp    chan *ClientResponse
+}
+
+type ClientResponse struct {
+	text       string
+	statuscode int
 }
 
 func (r *ClientRequest) Type() string {
@@ -136,11 +144,11 @@ func (r *ClientRequest) Unmarshal(data []byte) {
 }
 
 type Transport interface {
-	Run()
+	Run(context.Context)
 	ReceiveChan() <-chan Message
 	SendAppendEntries(*Peer, *AppendEntriesReq) error
 	SendRequestVote(*Peer, *RequestVoteReq) error
 	ReplyAppendEntries(*Peer, *AppendEntriesReply) error
 	ReplyRequestVote(*Peer, *RequestVoteReply) error
-	ReplyClient(string, string)
+	SendLeaderPing(*LeaderPing) error
 }

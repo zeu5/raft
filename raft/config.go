@@ -13,7 +13,7 @@ type Config struct {
 	MasterAddr       string        `json:"master_addr"`
 	Slave            bool          `json:"slave"`
 
-	PCTWorkingDir string `json:"pct_working_dir`
+	PCTWorkingDir string `json:"pct_working_dir"`
 }
 
 func ConfigFromJson(s []byte) *Config {

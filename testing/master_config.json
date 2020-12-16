@@ -2,7 +2,9 @@
     "heartbeat_timeout": 2000,
     "election_timeout": 2000,
     "peers" : ["localhost:7070", "localhost:7071", "localhost:7072"],
-    "cur_node_id": 2,
+    "cur_node_id": -1,
     "slave" : true,
-    "master_addr" : "localhost:7073"
+    "master_addr" : "localhost:7073",
+
+    "pct_working_dir": "/tmp/ipc"
 }

@@ -1,7 +1,6 @@
 package raft
 
 import (
-	"log"
 	"sync"
 )
 
@@ -70,7 +69,6 @@ func (m *MatchIndices) recalculate() {
 
 	if flag {
 		asyncNotify(m.commitCh)
-		log.Printf("Recalculated new index! %d", m.commitIndex)
 	}
 }
 
@@ -102,7 +100,6 @@ func (r *ReplicationState) UpdateReply(success bool, index int) {
 	r.lock.Lock()
 	defer r.lock.Unlock()
 	if success {
-		log.Printf("Got success reply from %d\n", r.peer.id)
 		r.matchIndex.Update(r.peer.id, index)
 	} else {
 		r.nextIndex = max(min(r.nextIndex-1, index), 1)
@@ -185,7 +182,6 @@ func (n *Node) leaderLoop() {
 	for n.state.RaftState() == Leader {
 		select {
 		case c := <-n.leaderState.incoming:
-			log.Printf("Storing log %#v\n", c)
 			logE := &LogEntry{
 				command: c,
 				index:   n.state.LastLogIndex() + 1,
@@ -229,4 +225,12 @@ func (n *Node) replicate(r *ReplicationState) {
 			r.IncNextIndex()
 		}
 	}
+}
+
+func (n *Node) informMaster() {
+	lp := &LeaderPing{
+		ID:   n.id,
+		Term: n.state.CurrentTerm(),
+	}
+	n.transport.SendLeaderPing(lp)
 }

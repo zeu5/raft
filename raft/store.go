@@ -48,14 +48,13 @@ func (m *MemStore) LogAt(index int) *LogEntry {
 func (m *MemStore) AppendLog(l *LogEntry) {
 	m.lock.Lock()
 	defer m.lock.Unlock()
-	if l.index > m.size+1 {
+	if l.index > m.size {
 		diff := l.index - m.size
 		m.logs = append(m.logs, make([]*LogEntry, diff)...)
 		m.logs[l.index-1] = l
 		m.size = l.index
 	} else {
-		m.logs = append(m.logs, l)
-		m.size = m.size + 1
+		m.logs[l.index-1] = l
 	}
 }
 
@@ -70,6 +69,6 @@ func (m *MemStore) Slice(from int, to int) (logs []*LogEntry) {
 	if from < 1 || from > m.size || to < from || to < 1 {
 		return
 	}
-	logs = m.logs[from-1 : to-1]
+	logs = m.logs[from-1 : to]
 	return
 }

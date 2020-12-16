@@ -2,10 +2,12 @@ package raft
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
+	"time"
 )
 
 type HTTPTransport struct {
@@ -16,6 +18,7 @@ type HTTPTransport struct {
 	timeoutChan chan *TimeoutMessage
 	id          int
 	slave       bool
+	server      *http.Server
 }
 
 type TransportMessage struct {
@@ -24,27 +27,36 @@ type TransportMessage struct {
 }
 
 func NewHTTPTransport(c *Config, p *PeerStore) *HTTPTransport {
-	return &HTTPTransport{
-		recvChan:   make(chan Message, 100),
-		peerStore:  p,
-		serverAddr: c.Peers[c.CurNodeIndex],
-		masterAddr: c.MasterAddr,
-		id:         c.CurNodeIndex,
-		slave:      c.Slave,
+	t := &HTTPTransport{
+		recvChan:    make(chan Message, 100),
+		peerStore:   p,
+		serverAddr:  c.Peers[c.CurNodeIndex],
+		masterAddr:  c.MasterAddr,
+		id:          c.CurNodeIndex,
+		slave:       c.Slave,
+		timeoutChan: make(chan *TimeoutMessage, 100),
 	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", t.HandlerFunc)
+
+	t.server = &http.Server{
+		Addr:    t.serverAddr,
+		Handler: mux,
+	}
+	return t
 }
 
 func (t *HTTPTransport) HandlerFunc(w http.ResponseWriter, r *http.Request) {
-	defer fmt.Fprintf(w, "Ok")
 	if r.Method != "POST" {
 		return
 	}
 	d := json.NewDecoder(r.Body)
 	var m TransportMessage
 	if err := d.Decode(&m); err == nil {
-		// log.Printf("Received message of type %s: %s", m.Type, m.Message)
+		log.Printf("Received message of type %s: %s", m.Type, m.Message)
 		var req Message
 		timeoutMessage := false
+		waitResponse := false
 		switch m.Type {
 		case "AppendEntriesReq":
 			req = &AppendEntriesReq{}
@@ -55,7 +67,10 @@ func (t *HTTPTransport) HandlerFunc(w http.ResponseWriter, r *http.Request) {
 		case "RequestVoteReply":
 			req = &RequestVoteReply{}
 		case "ClientRequest":
-			req = &ClientRequest{}
+			waitResponse = true
+			req = &ClientRequest{
+				resp: make(chan *ClientResponse),
+			}
 		case "Timeout":
 			req = &TimeoutMessage{}
 			timeoutMessage = true
@@ -65,6 +80,15 @@ func (t *HTTPTransport) HandlerFunc(w http.ResponseWriter, r *http.Request) {
 			t.recvChan <- req
 		} else {
 			t.timeoutChan <- req.(*TimeoutMessage)
+		}
+
+		if !waitResponse {
+			fmt.Fprintf(w, "OK")
+		} else {
+			cReq := req.(*ClientRequest)
+			resp := <-cReq.resp
+			w.WriteHeader(resp.statuscode)
+			fmt.Fprintf(w, "%s", resp.text)
 		}
 	}
 	r.Body.Close()
@@ -90,22 +114,36 @@ func (t *HTTPTransport) sendMasterMsg(to int, m Message) error {
 	if err != nil {
 		return fmt.Errorf("Could not format message to master %s", err)
 	}
-	return t.sendMsg(t.masterAddr, body)
+	log.Printf("Sending master message %s\n", body)
+	return t.sendMsg("http://"+t.masterAddr, body)
 }
 
-func (t *HTTPTransport) Run() {
-	http.HandleFunc("/", t.HandlerFunc)
+func (t *HTTPTransport) Run(ctx context.Context) {
 	log.Printf("Starting server at %s\n", t.serverAddr)
-	http.ListenAndServe(t.serverAddr, nil)
+
+	go func() {
+		if err := t.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Failed to start transport server: %+s\n", err)
+		}
+	}()
+
+	<-ctx.Done()
+	shutDownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer func() {
+		cancel()
+	}()
+
+	if err := t.server.Shutdown(shutDownCtx); err != nil {
+		log.Fatalf("Error shutting down server: %+s\n", err)
+	}
 }
 
 func (t *HTTPTransport) ReceiveChan() <-chan Message {
 	return t.recvChan
 }
 
-func (t *HTTPTransport) sendMsg(addr string, body []byte) error {
-	// log.Printf("Sending message %#v to %#v\n", r, p)
-	url := "http://" + addr
+func (t *HTTPTransport) sendMsg(url string, body []byte) error {
+	// log.Printf("Sending message %s to %s\n", body, addr)
 	client := &http.Client{}
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -130,7 +168,7 @@ func (t *HTTPTransport) SendMsg(p *Peer, m Message) error {
 	if err != nil {
 		return fmt.Errorf("Could not marshall message %s", err)
 	}
-	return t.sendMsg(p.addr, body)
+	return t.sendMsg("http://"+p.addr, body)
 }
 
 func (t *HTTPTransport) SendAppendEntries(p *Peer, r *AppendEntriesReq) error {
@@ -149,6 +187,14 @@ func (t *HTTPTransport) ReplyRequestVote(p *Peer, r *RequestVoteReply) error {
 	return t.SendMsg(p, r)
 }
 
-func (t *HTTPTransport) ReplyClient(addr, msg string) {
-
+func (t *HTTPTransport) SendLeaderPing(l *LeaderPing) error {
+	if t.slave {
+		l.Addr = t.serverAddr
+		body, err := json.Marshal(l)
+		if err != nil {
+			return fmt.Errorf("Could not marshal request")
+		}
+		return t.sendMsg("http://"+t.masterAddr+"/leader", body)
+	}
+	return nil
 }
