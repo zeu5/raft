@@ -13,8 +13,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/epaxos/src/dlog"
 )
 
 const (
@@ -235,7 +233,6 @@ func (f *FileInterface) commitFile(filename string) error {
 }
 
 func (f *FileInterface) createFile(filename string, content string) error {
-	dlog.Printf("Creating file %s with content %s\n", filename, content)
 
 	file, err := os.Create(filepath.Join(f.newDir, filename))
 	if err != nil {

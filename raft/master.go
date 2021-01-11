@@ -30,7 +30,7 @@ type Master struct {
 
 func NewMaster(c *Config) *Master {
 	peers := NewPeerStore(c)
-	ctr := NewTimeoutController()
+	ctr := NewStructuredTimeoutController(c)
 	m := &Master{
 		peers:      peers,
 		controller: ctr,
