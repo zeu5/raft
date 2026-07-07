@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package netrixdsl_test
+package netrix_test
 
 import (
 	"math"
@@ -22,7 +22,7 @@ import (
 
 	"go.etcd.io/raft/v3"
 	pb "go.etcd.io/raft/v3/raftpb"
-	"go.etcd.io/raft/v3/netrixdsl"
+	"go.etcd.io/raft/v3/scenariotests/netrix"
 	"go.etcd.io/raft/v3/rafttest"
 )
 
@@ -56,12 +56,12 @@ func tickAll(env *rafttest.InteractionEnv) {
 func TestAllMessagesDelivered(t *testing.T) {
 	env := newEnv(t)
 
-	sm := netrixdsl.NewStateMachine()
+	sm := netrix.NewStateMachine()
 	init := sm.Builder()
 	// The leader immediately sends MsgApp (with no-op entry) to followers.
-	init.On(netrixdsl.IsMessageType(pb.MsgApp), netrixdsl.SuccessState)
+	init.On(netrix.IsMessageType(pb.MsgApp), netrix.SuccessState)
 
-	tc := &netrixdsl.TestCase{
+	tc := &netrix.TestCase{
 		Name:         "election-succeeds",
 		MaxRounds:    50,
 		StateMachine: sm,
@@ -70,7 +70,7 @@ func TestAllMessagesDelivered(t *testing.T) {
 		},
 	}
 
-	result := netrixdsl.Run(tc, env)
+	result := netrix.Run(tc, env)
 	require.NoError(t, result.Err)
 	require.True(t, result.Success, "expected MsgApp from leader, final state: %s", result.FinalState)
 }
@@ -82,16 +82,16 @@ func TestDropAllVotes(t *testing.T) {
 
 	// We succeed (i.e., confirm the absence of a leader) if the run ends
 	// without hitting FailureState.
-	sm := netrixdsl.NewStateMachine()
+	sm := netrix.NewStateMachine()
 	init := sm.Builder()
 	// Seeing a MsgApp means a leader was elected — that's the failure condition.
-	init.On(netrixdsl.IsMessageType(pb.MsgApp), netrixdsl.FailureState)
+	init.On(netrix.IsMessageType(pb.MsgApp), netrix.FailureState)
 
-	filters := netrixdsl.NewFilterSet()
+	filters := netrix.NewFilterSet()
 	// Drop all vote messages so no election can complete.
-	filters.AddFilter(netrixdsl.If(netrixdsl.IsMessageType(pb.MsgVote)).Then(netrixdsl.DropMessage()))
+	filters.AddFilter(netrix.If(netrix.IsMessageType(pb.MsgVote)).Then(netrix.DropMessage()))
 
-	tc := &netrixdsl.TestCase{
+	tc := &netrix.TestCase{
 		Name:         "drop-votes-no-leader",
 		MaxRounds:    10,
 		StateMachine: sm,
@@ -101,7 +101,7 @@ func TestDropAllVotes(t *testing.T) {
 		},
 	}
 
-	result := netrixdsl.Run(tc, env)
+	result := netrix.Run(tc, env)
 	require.NoError(t, result.Err)
 	require.False(t, result.IsFailure(),
 		"no leader should be elected when all votes are dropped")
@@ -117,32 +117,32 @@ func TestPartitionLeaderAfterElection(t *testing.T) {
 	// Phase 2: drop subsequent messages from node 1 (simulating a partition).
 	// Phase 3: wait for a MsgVote from any node other than 1 (new election).
 
-	sm := netrixdsl.NewStateMachine()
+	sm := netrix.NewStateMachine()
 	init := sm.Builder()
 	// Phase 1 → 2: first MsgApp confirms leader election.
-	phase2 := init.On(netrixdsl.IsMessageType(pb.MsgApp), "leader-elected")
+	phase2 := init.On(netrix.IsMessageType(pb.MsgApp), "leader-elected")
 	// Phase 2 → success: a follower starts a new election (sends MsgVote).
 	phase2.On(
-		netrixdsl.IsMessageType(pb.MsgVote).And(netrixdsl.IsMessageFrom(1).Not()),
-		netrixdsl.SuccessState,
+		netrix.IsMessageType(pb.MsgVote).And(netrix.IsMessageFrom(1).Not()),
+		netrix.SuccessState,
 	)
 
-	filters := netrixdsl.NewFilterSet()
+	filters := netrix.NewFilterSet()
 	// Once we have seen the leader's no-op MsgApp, drop all further messages
 	// from node 1 to simulate a partition.
-	filters.AddFilter(netrixdsl.If(
-		netrixdsl.IsMessageFrom(1).And(netrixdsl.Count("leader-seen").Geq(1)),
-	).Then(netrixdsl.DropMessage()))
+	filters.AddFilter(netrix.If(
+		netrix.IsMessageFrom(1).And(netrix.Count("leader-seen").Geq(1)),
+	).Then(netrix.DropMessage()))
 
 	// Count the first MsgApp and deliver it normally.
-	filters.AddFilter(netrixdsl.If(
-		netrixdsl.IsMessageType(pb.MsgApp).And(netrixdsl.Count("leader-seen").Lt(1)),
+	filters.AddFilter(netrix.If(
+		netrix.IsMessageType(pb.MsgApp).And(netrix.Count("leader-seen").Lt(1)),
 	).Then(
-		netrixdsl.Count("leader-seen").Incr(),
-		netrixdsl.DeliverMessage(),
+		netrix.Count("leader-seen").Incr(),
+		netrix.DeliverMessage(),
 	))
 
-	tc := &netrixdsl.TestCase{
+	tc := &netrix.TestCase{
 		Name:         "leader-partition",
 		MaxRounds:    200,
 		StateMachine: sm,
@@ -156,7 +156,7 @@ func TestPartitionLeaderAfterElection(t *testing.T) {
 		},
 	}
 
-	result := netrixdsl.Run(tc, env)
+	result := netrix.Run(tc, env)
 	require.NoError(t, result.Err)
 	require.True(t, result.Success,
 		"expected new election after partitioning leader, final state: %s after %d rounds",
@@ -170,23 +170,23 @@ func TestMessageRecording(t *testing.T) {
 
 	const setLabel = "votes"
 	// Store the first 2 MsgVote messages. On the 3rd, flush everything.
-	filters := netrixdsl.NewFilterSet()
+	filters := netrix.NewFilterSet()
 
-	filters.AddFilter(netrixdsl.If(
-		netrixdsl.IsMessageType(pb.MsgVote).And(netrixdsl.Count(setLabel).Lt(2)),
+	filters.AddFilter(netrix.If(
+		netrix.IsMessageType(pb.MsgVote).And(netrix.Count(setLabel).Lt(2)),
 	).Then(
-		netrixdsl.Count(setLabel).Incr(),
-		netrixdsl.Set(setLabel).Store(),
+		netrix.Count(setLabel).Incr(),
+		netrix.Set(setLabel).Store(),
 	))
 
-	filters.AddFilter(netrixdsl.If(
-		netrixdsl.IsMessageType(pb.MsgVote).And(netrixdsl.Count(setLabel).Geq(2)),
+	filters.AddFilter(netrix.If(
+		netrix.IsMessageType(pb.MsgVote).And(netrix.Count(setLabel).Geq(2)),
 	).Then(
-		netrixdsl.Set(setLabel).DeliverAll(),
-		netrixdsl.DeliverMessage(),
+		netrix.Set(setLabel).DeliverAll(),
+		netrix.DeliverMessage(),
 	))
 
-	tc := &netrixdsl.TestCase{
+	tc := &netrix.TestCase{
 		Name:      "message-recording",
 		MaxRounds: 50,
 		Filters:   filters,
@@ -195,7 +195,7 @@ func TestMessageRecording(t *testing.T) {
 		},
 	}
 
-	result := netrixdsl.Run(tc, env)
+	result := netrix.Run(tc, env)
 	require.NoError(t, result.Err)
 	require.Equal(t, "no-state-machine", result.FinalState)
 	// The cluster should still have made progress: an election happened.
@@ -207,18 +207,18 @@ func TestCounterConditions(t *testing.T) {
 	env := newEnv(t)
 	const ctr = "msgcount"
 
-	sm := netrixdsl.NewStateMachine()
+	sm := netrix.NewStateMachine()
 	init := sm.Builder()
 	// Succeed once we have seen at least 5 messages total.
-	init.On(netrixdsl.Count(ctr).Geq(5), netrixdsl.SuccessState)
+	init.On(netrix.Count(ctr).Geq(5), netrix.SuccessState)
 
-	filters := netrixdsl.NewFilterSet()
-	filters.AddFilter(netrixdsl.If(netrixdsl.Always()).Then(
-		netrixdsl.Count(ctr).Incr(),
-		netrixdsl.DeliverMessage(),
+	filters := netrix.NewFilterSet()
+	filters.AddFilter(netrix.If(netrix.Always()).Then(
+		netrix.Count(ctr).Incr(),
+		netrix.DeliverMessage(),
 	))
 
-	tc := &netrixdsl.TestCase{
+	tc := &netrix.TestCase{
 		Name:         "counter-conditions",
 		MaxRounds:    100,
 		StateMachine: sm,
@@ -228,7 +228,7 @@ func TestCounterConditions(t *testing.T) {
 		},
 	}
 
-	result := netrixdsl.Run(tc, env)
+	result := netrix.Run(tc, env)
 	require.NoError(t, result.Err)
 	require.True(t, result.Success, "expected to count 5 messages, final state: %s", result.FinalState)
 }
@@ -238,13 +238,13 @@ func TestBooleanConditionComposition(t *testing.T) {
 	env := newEnv(t)
 
 	// Conditions: message is from node 1 AND to node 2.
-	fromOneToTwo := netrixdsl.IsMessageFrom(1).And(netrixdsl.IsMessageTo(2))
+	fromOneToTwo := netrix.IsMessageFrom(1).And(netrix.IsMessageTo(2))
 
-	sm := netrixdsl.NewStateMachine()
+	sm := netrix.NewStateMachine()
 	init := sm.Builder()
-	init.On(fromOneToTwo, netrixdsl.SuccessState)
+	init.On(fromOneToTwo, netrix.SuccessState)
 
-	tc := &netrixdsl.TestCase{
+	tc := &netrix.TestCase{
 		Name:         "condition-composition",
 		MaxRounds:    50,
 		StateMachine: sm,
@@ -253,7 +253,45 @@ func TestBooleanConditionComposition(t *testing.T) {
 		},
 	}
 
-	result := netrixdsl.Run(tc, env)
+	result := netrix.Run(tc, env)
 	require.NoError(t, result.Err)
 	require.True(t, result.Success, "expected to see a message from 1 to 2, final state: %s", result.FinalState)
+}
+
+// TestIterationsRetryUntilSuccess verifies that Run retries the scenario up to
+// Iterations times and stops as soon as one attempt succeeds, reporting the
+// correct 1-based Iteration index in the result.
+//
+// The test uses a counter in the EnvFunc closure to make the first two
+// iterations deliberately fail (MaxRounds=1, no messages → no success) and
+// succeed on the third by giving it enough rounds to see a MsgApp.
+func TestIterationsRetryUntilSuccess(t *testing.T) {
+	attempt := 0
+
+	sm := netrix.NewStateMachine()
+	sm.Builder().On(netrix.IsMessageType(pb.MsgApp), netrix.SuccessState)
+
+	tc := &netrix.TestCase{
+		Name:         "iterations-retry",
+		Iterations:   5,
+		MaxRounds:    1,
+		StateMachine: sm,
+		SetupFunc: func(e *rafttest.InteractionEnv) error {
+			return e.Campaign(0)
+		},
+	}
+	tc.EnvFunc = func() *rafttest.InteractionEnv {
+		attempt++
+		// Give later attempts enough rounds to complete an election.
+		if attempt >= 3 {
+			tc.MaxRounds = 50
+		}
+		return newEnv(t)
+	}
+
+	result := netrix.Run(tc, nil)
+	require.NoError(t, result.Err)
+	require.True(t, result.Success, "expected success by iteration 3, final state: %s", result.FinalState)
+	require.GreaterOrEqual(t, result.Iteration, 3, "expected at least 3 iterations before success")
+	require.Equal(t, attempt, result.Iteration, "EnvFunc call count should match Iteration")
 }

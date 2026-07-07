@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package netrixdsl
+package netrix
 
 import pb "go.etcd.io/raft/v3/raftpb"
 
@@ -78,6 +78,14 @@ func IsMessageTo(id uint64) Condition {
 	return func(e *Event, _ *Context) bool {
 		return e.To == id
 	}
+}
+
+// When returns a Condition that evaluates the provided function on every event.
+// Use it to close over external state that changes between rounds:
+//
+//	netrix.When(func() bool { return snapshotSetup })
+func When(f func() bool) Condition {
+	return func(*Event, *Context) bool { return f() }
 }
 
 // Always returns a Condition that is always true.

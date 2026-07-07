@@ -12,14 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package netrixdsl implements the Netrix DSL for testing distributed protocol
+// Package netrix implements the Netrix DSL for testing distributed protocol
 // implementations, as described in "A Domain Specific Language for Testing
 // Consensus Implementations" (Dragoi, Enea, Nagendra, Srivas, 2023).
 //
 // It builds on top of the rafttest package and provides composable
 // Conditions, Actions, Filters, and StateMachines for expressing test
 // scenarios and asserting properties of the Raft implementation.
-package netrixdsl
+package netrix
 
 import (
 	pb "go.etcd.io/raft/v3/raftpb"

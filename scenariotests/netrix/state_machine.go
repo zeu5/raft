@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package netrixdsl
+package netrix
 
 // Sentinel state labels used as targets in StateMachine transitions.
 const (

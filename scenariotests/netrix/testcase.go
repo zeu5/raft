@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package netrixdsl
+package netrix
 
 import "go.etcd.io/raft/v3/rafttest"
 
@@ -27,6 +27,15 @@ type TestCase struct {
 	// is considered timed out. Zero means no limit (run until the state
 	// machine reaches a terminal state or no more work remains).
 	MaxRounds int
+
+	// Iterations is the number of times the scenario is retried from a clean
+	// environment. The run succeeds if any iteration succeeds. Zero or 1 means
+	// run once. EnvFunc must be set when Iterations > 1.
+	Iterations int
+
+	// EnvFunc constructs a fresh InteractionEnv for each iteration. Required
+	// when Iterations > 1; ignored when Iterations <= 1.
+	EnvFunc func() *rafttest.InteractionEnv
 
 	// StateMachine asserts a property over the event stream. If nil, the test
 	// succeeds as long as no error occurs and MaxRounds is not exceeded.

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package netrixdsl
+package netrix
 
 import (
 	"fmt"
@@ -32,6 +32,9 @@ type RunResult struct {
 	FinalState string
 	// Rounds is the number of stabilize-like iterations performed.
 	Rounds int
+	// Iteration is the 1-based index of the iteration that produced this
+	// result. Zero when Iterations <= 1 (single run).
+	Iteration int
 	// Events is the ordered list of events observed during the run.
 	Events []*Event
 	// Err holds any fatal error encountered during the run.
@@ -45,15 +48,40 @@ func (r RunResult) IsFailure() bool {
 
 // Run executes the TestCase against the provided InteractionEnv.
 //
-// Run drives the environment in a stabilize loop: each iteration processes all
-// pending raft Ready states and async threads, then intercepts the in-flight
-// message pool and passes each message through the TestCase's FilterSet before
-// delivering it. After each message is processed the StateMachine is stepped.
-// The loop continues until no more work remains, the state machine reaches a
-// terminal state, or MaxRounds is exceeded.
+// When tc.Iterations > 1, Run ignores env and instead calls tc.EnvFunc to
+// obtain a fresh environment for each iteration, resetting the state machine
+// between attempts. The run succeeds as soon as any iteration succeeds.
 //
-// The caller is responsible for adding nodes to env (or using tc.SetupFunc).
+// When tc.Iterations <= 1, Run behaves as a single run against env (backwards
+// compatible).
 func Run(tc *TestCase, env *rafttest.InteractionEnv) RunResult {
+	iterations := tc.Iterations
+	if iterations <= 1 {
+		return runOnce(tc, env)
+	}
+	var last RunResult
+	for i := 0; i < iterations; i++ {
+		if tc.StateMachine != nil {
+			tc.StateMachine.Reset()
+		}
+		last = runOnce(tc, tc.EnvFunc())
+		if last.Success {
+			last.Iteration = i + 1
+			return last
+		}
+	}
+	last.Iteration = iterations
+	return last
+}
+
+// runOnce drives the TestCase against env for a single attempt.
+//
+// It processes all pending raft Ready states and async threads each round,
+// intercepts the in-flight message pool and routes each message through the
+// TestCase's FilterSet, then steps the StateMachine. The loop ends when no
+// more work remains, the state machine reaches a terminal state, or MaxRounds
+// is exceeded.
+func runOnce(tc *TestCase, env *rafttest.InteractionEnv) RunResult {
 	ctx := NewContext()
 
 	// Run optional setup.
@@ -85,11 +113,10 @@ func Run(tc *TestCase, env *rafttest.InteractionEnv) RunResult {
 		round++
 
 		// Issue ticks for this round if configured.
+		anyWork := tc.TickFunc != nil
 		if tc.TickFunc != nil {
 			tc.TickFunc(env, round)
 		}
-
-		anyWork := false
 
 		// Process all pending Ready states.
 		for i := range env.Nodes {
