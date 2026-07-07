@@ -19,15 +19,15 @@ import (
 
 	"github.com/stretchr/testify/require"
 	pb "go.etcd.io/raft/v3/raftpb"
-	"go.etcd.io/raft/v3/scenariotests/netrix"
 	"go.etcd.io/raft/v3/rafttest"
+	"go.etcd.io/raft/v3/scenariotests/netrix"
 )
 
 // TestAddServerViaConfChange verifies that proposing a ConfChange to add a
 // new server causes the leader to replicate a ConfChange entry (MsgApp with
 // EntryConfChange/V2), covering the TLA+ AddNewServer action.
 func TestAddServerViaConfChange(t *testing.T) {
-	env := newEnv(t, 3)
+	envFunc := func() *rafttest.InteractionEnv { return newEnv(t, 3) }
 
 	sm := netrix.NewStateMachine()
 	sm.Builder().On(hasConfChangeEntry(), netrix.SuccessState).MarkSuccess()
@@ -51,7 +51,7 @@ func TestAddServerViaConfChange(t *testing.T) {
 		},
 		SetupFunc: func(e *rafttest.InteractionEnv) error { return e.Campaign(0) },
 	}
-	result := netrix.Run(tc, env)
+	result := runNetrixTest(t, tc, envFunc)
 	require.NoError(t, result.Err)
 	require.True(t, result.Success,
 		"expected leader to replicate ConfChange entry for new server, final state: %s", result.FinalState)
@@ -61,12 +61,8 @@ func TestAddServerViaConfChange(t *testing.T) {
 // via ConfChange, it receives MsgApp log replication from the leader
 // (TLA+ AddLearner action).
 func TestAddLearnerReceivesReplication(t *testing.T) {
-	env := newEnv(t, 3)
-	// Add node 4 as a learner to the environment.
+	envFunc := func() *rafttest.InteractionEnv { return newEnv(t, 3) }
 	require := require.New(t)
-	nodeCfg := *env.Nodes[0].Config
-	nodeCfg.Logger = nil
-	require.NoError(env.AddNodes(1, nodeCfg, nil))
 
 	proposed := false
 	learnerReplicated := netrix.IsMessageType(pb.MsgApp).And(netrix.IsMessageTo(4))
@@ -90,9 +86,17 @@ func TestAddLearnerReceivesReplication(t *testing.T) {
 				})
 			}
 		},
-		SetupFunc: func(e *rafttest.InteractionEnv) error { return e.Campaign(0) },
+		SetupFunc: func(e *rafttest.InteractionEnv) error {
+			// Add node 4 as a learner to the environment.
+			nodeCfg := *e.Nodes[0].Config
+			nodeCfg.Logger = nil
+			if err := e.AddNodes(1, nodeCfg, nil); err != nil {
+				return err
+			}
+			return e.Campaign(0)
+		},
 	}
-	result := netrix.Run(tc, env)
+	result := runNetrixTest(t, tc, envFunc)
 	require.NoError(result.Err)
 	require.True(result.Success,
 		"expected learner to receive MsgApp after being added, final state: %s", result.FinalState)
@@ -102,7 +106,7 @@ func TestAddLearnerReceivesReplication(t *testing.T) {
 // ConfChange does not cause a leadership disruption (TLA+ DeleteServer action).
 // The leader should continue sending heartbeats after the removal is applied.
 func TestRemoveServerNoLeadershipLoss(t *testing.T) {
-	env := newEnv(t, 4)
+	envFunc := func() *rafttest.InteractionEnv { return newEnv(t, 4) }
 
 	var removalProposed bool
 	var leaderID uint64
@@ -146,7 +150,7 @@ func TestRemoveServerNoLeadershipLoss(t *testing.T) {
 		},
 		SetupFunc: func(e *rafttest.InteractionEnv) error { return e.Campaign(0) },
 	}
-	result := netrix.Run(tc, env)
+	result := runNetrixTest(t, tc, envFunc)
 	require.NoError(t, result.Err)
 	require.True(t, result.Success,
 		"expected leader to continue after server removal, final state: %s after %d rounds",

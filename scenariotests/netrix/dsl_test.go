@@ -22,9 +22,18 @@ import (
 
 	"go.etcd.io/raft/v3"
 	pb "go.etcd.io/raft/v3/raftpb"
-	"go.etcd.io/raft/v3/scenariotests/netrix"
 	"go.etcd.io/raft/v3/rafttest"
+	"go.etcd.io/raft/v3/scenariotests/netrix"
 )
+
+const netrixTestIterations = 20
+
+func runNetrixTest(t *testing.T, tc *netrix.TestCase, envFunc func() *rafttest.InteractionEnv) netrix.RunResult {
+	t.Helper()
+	tc.Iterations = netrixTestIterations
+	tc.EnvFunc = envFunc
+	return netrix.Run(tc, nil)
+}
 
 // newEnv creates a 3-node raft cluster bootstrapped at index 10 for testing.
 func newEnv(t *testing.T) *rafttest.InteractionEnv {
@@ -54,7 +63,7 @@ func tickAll(env *rafttest.InteractionEnv) {
 // TestAllMessagesDelivered verifies that with no filters, a cluster stabilizes
 // after an election: we see the no-op MsgApp the leader sends immediately.
 func TestAllMessagesDelivered(t *testing.T) {
-	env := newEnv(t)
+	envFunc := func() *rafttest.InteractionEnv { return newEnv(t) }
 
 	sm := netrix.NewStateMachine()
 	init := sm.Builder()
@@ -70,7 +79,7 @@ func TestAllMessagesDelivered(t *testing.T) {
 		},
 	}
 
-	result := netrix.Run(tc, env)
+	result := runNetrixTest(t, tc, envFunc)
 	require.NoError(t, result.Err)
 	require.True(t, result.Success, "expected MsgApp from leader, final state: %s", result.FinalState)
 }
@@ -78,7 +87,7 @@ func TestAllMessagesDelivered(t *testing.T) {
 // TestDropAllVotes verifies that when MsgVote messages are dropped, no leader
 // can be elected (no MsgApp from a leader should appear within MaxRounds).
 func TestDropAllVotes(t *testing.T) {
-	env := newEnv(t)
+	envFunc := func() *rafttest.InteractionEnv { return newEnv(t) }
 
 	// We succeed (i.e., confirm the absence of a leader) if the run ends
 	// without hitting FailureState.
@@ -101,7 +110,7 @@ func TestDropAllVotes(t *testing.T) {
 		},
 	}
 
-	result := netrix.Run(tc, env)
+	result := runNetrixTest(t, tc, envFunc)
 	require.NoError(t, result.Err)
 	require.False(t, result.IsFailure(),
 		"no leader should be elected when all votes are dropped")
@@ -111,7 +120,7 @@ func TestDropAllVotes(t *testing.T) {
 // the leader (node 1) after it is elected does not produce further MsgApp from
 // node 1, and that the other nodes can proceed to a new election.
 func TestPartitionLeaderAfterElection(t *testing.T) {
-	env := newEnv(t)
+	envFunc := func() *rafttest.InteractionEnv { return newEnv(t) }
 
 	// Phase 1: let the election complete by waiting for the leader's MsgApp.
 	// Phase 2: drop subsequent messages from node 1 (simulating a partition).
@@ -156,7 +165,7 @@ func TestPartitionLeaderAfterElection(t *testing.T) {
 		},
 	}
 
-	result := netrix.Run(tc, env)
+	result := runNetrixTest(t, tc, envFunc)
 	require.NoError(t, result.Err)
 	require.True(t, result.Success,
 		"expected new election after partitioning leader, final state: %s after %d rounds",
@@ -166,7 +175,7 @@ func TestPartitionLeaderAfterElection(t *testing.T) {
 // TestMessageRecording verifies that Set().Store() and Set().DeliverAll()
 // correctly buffer and replay messages.
 func TestMessageRecording(t *testing.T) {
-	env := newEnv(t)
+	envFunc := func() *rafttest.InteractionEnv { return newEnv(t) }
 
 	const setLabel = "votes"
 	// Store the first 2 MsgVote messages. On the 3rd, flush everything.
@@ -195,7 +204,7 @@ func TestMessageRecording(t *testing.T) {
 		},
 	}
 
-	result := netrix.Run(tc, env)
+	result := runNetrixTest(t, tc, envFunc)
 	require.NoError(t, result.Err)
 	require.Equal(t, "no-state-machine", result.FinalState)
 	// The cluster should still have made progress: an election happened.
@@ -204,7 +213,7 @@ func TestMessageRecording(t *testing.T) {
 
 // TestCounterConditions exercises counter-based conditions across a run.
 func TestCounterConditions(t *testing.T) {
-	env := newEnv(t)
+	envFunc := func() *rafttest.InteractionEnv { return newEnv(t) }
 	const ctr = "msgcount"
 
 	sm := netrix.NewStateMachine()
@@ -228,14 +237,14 @@ func TestCounterConditions(t *testing.T) {
 		},
 	}
 
-	result := netrix.Run(tc, env)
+	result := runNetrixTest(t, tc, envFunc)
 	require.NoError(t, result.Err)
 	require.True(t, result.Success, "expected to count 5 messages, final state: %s", result.FinalState)
 }
 
 // TestBooleanConditionComposition verifies And/Or/Not composition.
 func TestBooleanConditionComposition(t *testing.T) {
-	env := newEnv(t)
+	envFunc := func() *rafttest.InteractionEnv { return newEnv(t) }
 
 	// Conditions: message is from node 1 AND to node 2.
 	fromOneToTwo := netrix.IsMessageFrom(1).And(netrix.IsMessageTo(2))
@@ -253,7 +262,7 @@ func TestBooleanConditionComposition(t *testing.T) {
 		},
 	}
 
-	result := netrix.Run(tc, env)
+	result := runNetrixTest(t, tc, envFunc)
 	require.NoError(t, result.Err)
 	require.True(t, result.Success, "expected to see a message from 1 to 2, final state: %s", result.FinalState)
 }

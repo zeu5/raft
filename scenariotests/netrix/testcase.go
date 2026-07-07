@@ -37,6 +37,10 @@ type TestCase struct {
 	// when Iterations > 1; ignored when Iterations <= 1.
 	EnvFunc func() *rafttest.InteractionEnv
 
+	// ResetFunc resets any test-local state captured by filters, conditions,
+	// setup, or tick callbacks before each iteration. Optional.
+	ResetFunc func()
+
 	// StateMachine asserts a property over the event stream. If nil, the test
 	// succeeds as long as no error occurs and MaxRounds is not exceeded.
 	StateMachine *StateMachine

@@ -18,10 +18,25 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"go.etcd.io/raft/v3/scenariotests/netrix"
 	pb "go.etcd.io/raft/v3/raftpb"
 	"go.etcd.io/raft/v3/rafttest"
+	"go.etcd.io/raft/v3/scenariotests/netrix"
 )
+
+const (
+	maxCommitKey      = "maxCommit"
+	recordedCommitKey = "recordedCommit"
+	maxTermSeenKey    = "maxTermSeen"
+)
+
+func uint64ByNode(ctx *netrix.Context, key string) map[uint64]uint64 {
+	if byNode, ok := netrix.GetVar[map[uint64]uint64](ctx, key); ok {
+		return byNode
+	}
+	byNode := make(map[uint64]uint64)
+	netrix.SetVar(ctx, key, byNode)
+	return byNode
+}
 
 // TestCommittedEntriesNeverDiverge verifies the LogInv TLA+ invariant:
 // committed log prefixes from any two nodes must be consistent (one is a
@@ -29,15 +44,14 @@ import (
 // no leader ever sends a MsgApp with a Commit value lower than the highest
 // Commit it previously sent — a necessary condition for log monotonicity.
 func TestCommittedEntriesNeverDiverge(t *testing.T) {
-	env := newEnv(t, 3)
+	envFunc := func() *rafttest.InteractionEnv { return newEnv(t, 3) }
 
-	// Track per-node maximum commit index observed in MsgApp sends.
-	maxCommit := make(map[uint64]uint64)
-
-	commitDecreases := netrix.Condition(func(e *netrix.Event, _ *netrix.Context) bool {
+	commitDecreases := netrix.Condition(func(e *netrix.Event, ctx *netrix.Context) bool {
 		if e.Msg.GetType() != pb.MsgApp {
 			return false
 		}
+		// Track per-node maximum commit index observed in MsgApp sends.
+		maxCommit := uint64ByNode(ctx, maxCommitKey)
 		nodeID := e.From
 		commit := e.Msg.GetCommit()
 		if prev, ok := maxCommit[nodeID]; ok && commit < prev {
@@ -64,7 +78,7 @@ func TestCommittedEntriesNeverDiverge(t *testing.T) {
 		},
 		SetupFunc: func(e *rafttest.InteractionEnv) error { return e.Campaign(0) },
 	}
-	result := netrix.Run(tc, env)
+	result := runNetrixTest(t, tc, envFunc)
 	require.NoError(t, result.Err)
 	require.False(t, result.IsFailure(), "LogInv violated: commit index decreased for a node")
 }
@@ -74,33 +88,34 @@ func TestCommittedEntriesNeverDiverge(t *testing.T) {
 // entries. After the original leader commits entries and is then partitioned,
 // the new leader must eventually advance its commit index to match.
 func TestNewLeaderHasAllCommittedEntries(t *testing.T) {
-	env := newEnv(t, 3)
+	envFunc := func() *rafttest.InteractionEnv { return newEnv(t, 3) }
 
 	part := netrix.IsolateNode(1)
-	var recordedCommit uint64
 
 	// Phase 1: wait for original leader (node 1) to advance its commit index.
 	// Once a sufficient commit is seen, also isolate node 1 so a new leader must take over.
-	phase1Done := netrix.Condition(func(e *netrix.Event, _ *netrix.Context) bool {
+	phase1Done := netrix.Condition(func(e *netrix.Event, ctx *netrix.Context) bool {
 		if e.Msg.GetType() != pb.MsgApp || e.From != 1 {
 			return false
 		}
 		if e.Msg.GetCommit() > 10 { // beyond the bootstrap commit at index 10
-			recordedCommit = e.Msg.GetCommit()
+			netrix.SetVar(ctx, recordedCommitKey, e.Msg.GetCommit())
 			return true
 		}
 		return false
 	})
 
 	// Phase 2: new leader (not node 1) eventually commits to at least the same index.
-	newLeaderCommitOK := netrix.Condition(func(e *netrix.Event, _ *netrix.Context) bool {
+	newLeaderCommitOK := netrix.Condition(func(e *netrix.Event, ctx *netrix.Context) bool {
+		recordedCommit, _ := netrix.GetVar[uint64](ctx, recordedCommitKey)
 		return recordedCommit > 0 &&
 			e.Msg.GetType() == pb.MsgApp &&
 			e.From != 1 &&
 			e.Msg.GetCommit() >= recordedCommit
 	})
 
-	newLeaderCommitBehind := netrix.Condition(func(e *netrix.Event, _ *netrix.Context) bool {
+	newLeaderCommitBehind := netrix.Condition(func(e *netrix.Event, ctx *netrix.Context) bool {
+		recordedCommit, _ := netrix.GetVar[uint64](ctx, recordedCommitKey)
 		// A new leader sending MsgApp with a commit below a previously committed
 		// index would mean it is missing committed entries.
 		return recordedCommit > 0 &&
@@ -120,7 +135,10 @@ func TestNewLeaderHasAllCommittedEntries(t *testing.T) {
 	filters := netrix.NewFilterSet()
 	// Isolate node 1 once we've seen it commit beyond the bootstrap index.
 	filters.AddFilter(netrix.If(
-		netrix.When(func() bool { return recordedCommit > 0 }).And(part.IsHealed()),
+		netrix.Condition(func(_ *netrix.Event, ctx *netrix.Context) bool {
+			recordedCommit, _ := netrix.GetVar[uint64](ctx, recordedCommitKey)
+			return recordedCommit > 0
+		}).And(part.IsHealed()),
 	).Then(part.IsolateAction(), netrix.DeliverMessage()))
 	filters.AddFilter(part.Filter())
 
@@ -138,7 +156,7 @@ func TestNewLeaderHasAllCommittedEntries(t *testing.T) {
 		},
 		SetupFunc: func(e *rafttest.InteractionEnv) error { return e.Campaign(0) },
 	}
-	result := netrix.Run(tc, env)
+	result := runNetrixTest(t, tc, envFunc)
 	require.NoError(t, result.Err)
 	require.False(t, result.IsFailure(), "LeaderCompletenessInv violated: new leader is missing committed entries")
 	require.True(t, result.Success,
@@ -150,12 +168,12 @@ func TestNewLeaderHasAllCommittedEntries(t *testing.T) {
 // node across all messages: a node never sends a message with a term lower
 // than a term it previously sent (a necessary safety property).
 func TestTermMonotonicity(t *testing.T) {
-	env := newEnv(t, 3)
+	envFunc := func() *rafttest.InteractionEnv { return newEnv(t, 3) }
 
 	part := netrix.IsolateNode(3)
-	maxTermSeen := make(map[uint64]uint64) // nodeID → highest term seen in any message from it
 
-	termDecreased := netrix.Condition(func(e *netrix.Event, _ *netrix.Context) bool {
+	termDecreased := netrix.Condition(func(e *netrix.Event, ctx *netrix.Context) bool {
+		maxTermSeen := uint64ByNode(ctx, maxTermSeenKey) // nodeID → highest term seen in any message from it
 		nodeID := e.From
 		term := e.Msg.GetTerm()
 		if term == 0 {
@@ -182,6 +200,9 @@ func TestTermMonotonicity(t *testing.T) {
 		MaxRounds:    200,
 		StateMachine: sm,
 		Filters:      filters,
+		ResetFunc: func() {
+			part.Heal()
+		},
 		TickFunc: func(e *rafttest.InteractionEnv, round int) {
 			tickAll(e)
 			if round == 20 {
@@ -193,7 +214,7 @@ func TestTermMonotonicity(t *testing.T) {
 		},
 		SetupFunc: func(e *rafttest.InteractionEnv) error { return e.Campaign(0) },
 	}
-	result := netrix.Run(tc, env)
+	result := runNetrixTest(t, tc, envFunc)
 	require.NoError(t, result.Err)
 	require.False(t, result.IsFailure(), "term monotonicity violated: a node sent a message with a lower term")
 }

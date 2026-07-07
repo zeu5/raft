@@ -19,16 +19,16 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.etcd.io/raft/v3"
-	"go.etcd.io/raft/v3/scenariotests/netrix"
 	pb "go.etcd.io/raft/v3/raftpb"
 	"go.etcd.io/raft/v3/rafttest"
+	"go.etcd.io/raft/v3/scenariotests/netrix"
 )
 
 // TestLeadershipTransferComplete verifies the full leadership transfer
 // protocol: MsgTimeoutNow from current leader → MsgVote from transferee →
 // MsgApp from new leader (campaignTransfer path).
 func TestLeadershipTransferComplete(t *testing.T) {
-	env := newEnv(t, 3)
+	envFunc := func() *rafttest.InteractionEnv { return newEnv(t, 3) }
 
 	transferInitiated := false
 
@@ -64,7 +64,7 @@ func TestLeadershipTransferComplete(t *testing.T) {
 		},
 		SetupFunc: func(e *rafttest.InteractionEnv) error { return e.Campaign(0) },
 	}
-	result := netrix.Run(tc, env)
+	result := runNetrixTest(t, tc, envFunc)
 	require.NoError(t, result.Err)
 	require.True(t, result.Success,
 		"expected complete leadership transfer to node 3, final state: %s after %d rounds",
@@ -75,10 +75,12 @@ func TestLeadershipTransferComplete(t *testing.T) {
 // catches up a lagging transferee with MsgApp entries before sending
 // MsgTimeoutNow, ensuring the transferee is up to date before taking over.
 func TestLeadershipTransferCatchesUpLaggingTarget(t *testing.T) {
-	env := newEnvWithOpts(t, 3, func(c *raft.Config) {
-		c.ElectionTick = 20
-		c.HeartbeatTick = 1
-	})
+	envFunc := func() *rafttest.InteractionEnv {
+		return newEnvWithOpts(t, 3, func(c *raft.Config) {
+			c.ElectionTick = 20
+			c.HeartbeatTick = 1
+		})
+	}
 
 	part := netrix.IsolateNode(3)
 	var transferInitiated bool
@@ -128,7 +130,7 @@ func TestLeadershipTransferCatchesUpLaggingTarget(t *testing.T) {
 		},
 		SetupFunc: func(e *rafttest.InteractionEnv) error { return e.Campaign(0) },
 	}
-	result := netrix.Run(tc, env)
+	result := runNetrixTest(t, tc, envFunc)
 	require.NoError(t, result.Err)
 	require.True(t, result.Success,
 		"expected leader to catch up transferee before handing off leadership, final state: %s after %d rounds",

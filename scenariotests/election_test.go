@@ -18,16 +18,16 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"go.etcd.io/raft/v3/scenariotests/netrix"
 	pb "go.etcd.io/raft/v3/raftpb"
 	"go.etcd.io/raft/v3/rafttest"
+	"go.etcd.io/raft/v3/scenariotests/netrix"
 )
 
 // TestElectionPhases verifies the full election message sequence:
 // MsgVote → MsgVoteResp (granted) → MsgApp (no-op from new leader).
 // This traces the TLA+ actions Timeout → RequestVote → BecomeLeader.
 func TestElectionPhases(t *testing.T) {
-	env := newEnv(t, 3)
+	envFunc := func() *rafttest.InteractionEnv { return newEnv(t, 3) }
 
 	sm := netrix.NewStateMachine()
 	init := sm.Builder()
@@ -41,7 +41,7 @@ func TestElectionPhases(t *testing.T) {
 		StateMachine: sm,
 		SetupFunc:    func(e *rafttest.InteractionEnv) error { return e.Campaign(0) },
 	}
-	result := netrix.Run(tc, env)
+	result := runNetrixTest(t, tc, envFunc)
 	require.NoError(t, result.Err)
 	require.True(t, result.Success, "expected full election phases MsgVote→VoteResp→MsgApp, final state: %s", result.FinalState)
 }
@@ -49,7 +49,7 @@ func TestElectionPhases(t *testing.T) {
 // TestElectionRequiresQuorum verifies that no leader can be elected when all
 // vote messages are dropped, covering the TLA+ quorum requirement in BecomeLeader.
 func TestElectionRequiresQuorum(t *testing.T) {
-	env := newEnv(t, 3)
+	envFunc := func() *rafttest.InteractionEnv { return newEnv(t, 3) }
 
 	// MsgApp from a leader would mean election succeeded — failure condition.
 	sm := netrix.NewStateMachine()
@@ -66,7 +66,7 @@ func TestElectionRequiresQuorum(t *testing.T) {
 		Filters:      filters,
 		SetupFunc:    func(e *rafttest.InteractionEnv) error { return e.Campaign(0) },
 	}
-	result := netrix.Run(tc, env)
+	result := runNetrixTest(t, tc, envFunc)
 	require.NoError(t, result.Err)
 	require.False(t, result.IsFailure(), "no leader should be elected when all votes are dropped")
 }
@@ -74,7 +74,7 @@ func TestElectionRequiresQuorum(t *testing.T) {
 // TestElectionWithOneLostVote verifies that election succeeds even when one
 // vote message is dropped, demonstrating fault tolerance at quorum - 1.
 func TestElectionWithOneLostVote(t *testing.T) {
-	env := newEnv(t, 3)
+	envFunc := func() *rafttest.InteractionEnv { return newEnv(t, 3) }
 
 	sm := netrix.NewStateMachine()
 	sm.Builder().On(netrix.IsMessageType(pb.MsgApp), netrix.SuccessState).MarkSuccess()
@@ -92,7 +92,7 @@ func TestElectionWithOneLostVote(t *testing.T) {
 		Filters:      filters,
 		SetupFunc:    func(e *rafttest.InteractionEnv) error { return e.Campaign(0) },
 	}
-	result := netrix.Run(tc, env)
+	result := runNetrixTest(t, tc, envFunc)
 	require.NoError(t, result.Err)
 	require.True(t, result.Success, "election should succeed with one lost vote, final state: %s", result.FinalState)
 }
@@ -100,7 +100,7 @@ func TestElectionWithOneLostVote(t *testing.T) {
 // TestAtMostOneLeaderPerTerm verifies the MoreThanOneLeaderInv TLA+ invariant:
 // at most one node may act as leader per term at any point in time.
 func TestAtMostOneLeaderPerTerm(t *testing.T) {
-	env := newEnv(t, 3)
+	envFunc := func() *rafttest.InteractionEnv { return newEnv(t, 3) }
 
 	termLeaders := make(map[uint64]uint64) // term → first leader node ID seen
 
@@ -126,7 +126,7 @@ func TestAtMostOneLeaderPerTerm(t *testing.T) {
 		TickFunc:     func(e *rafttest.InteractionEnv, _ int) { tickAll(e) },
 		SetupFunc:    func(e *rafttest.InteractionEnv) error { return e.Campaign(0) },
 	}
-	result := netrix.Run(tc, env)
+	result := runNetrixTest(t, tc, envFunc)
 	require.NoError(t, result.Err)
 	require.False(t, result.IsFailure(), "MoreThanOneLeaderInv violated: two leaders detected in the same term")
 }
@@ -134,7 +134,7 @@ func TestAtMostOneLeaderPerTerm(t *testing.T) {
 // TestLeaderElectionWithConcurrentCandidates verifies that a leader eventually
 // emerges even when two candidates compete (split-vote recovery via term increment).
 func TestLeaderElectionWithConcurrentCandidates(t *testing.T) {
-	env := newEnv(t, 5)
+	envFunc := func() *rafttest.InteractionEnv { return newEnv(t, 5) }
 
 	sm := netrix.NewStateMachine()
 	sm.Builder().On(netrix.IsMessageType(pb.MsgApp), netrix.SuccessState).MarkSuccess()
@@ -161,7 +161,7 @@ func TestLeaderElectionWithConcurrentCandidates(t *testing.T) {
 			return e.Campaign(1)
 		},
 	}
-	result := netrix.Run(tc, env)
+	result := runNetrixTest(t, tc, envFunc)
 	require.NoError(t, result.Err)
 	require.True(t, result.Success, "expected leader after split vote recovery, final state: %s after %d rounds", result.FinalState, result.Rounds)
 }
@@ -172,7 +172,7 @@ func TestLeaderElectionWithConcurrentCandidates(t *testing.T) {
 // higher-term MsgVote which forces the original leader to step down (observable
 // as the original leader sending MsgVoteResp as a follower).
 func TestHigherTermMessageForcesStepdown(t *testing.T) {
-	env := newEnv(t, 3)
+	envFunc := func() *rafttest.InteractionEnv { return newEnv(t, 3) }
 
 	part := netrix.IsolateNode(3)
 
@@ -208,7 +208,7 @@ func TestHigherTermMessageForcesStepdown(t *testing.T) {
 		},
 		SetupFunc: func(e *rafttest.InteractionEnv) error { return e.Campaign(0) },
 	}
-	result := netrix.Run(tc, env)
+	result := runNetrixTest(t, tc, envFunc)
 	require.NoError(t, result.Err)
 	require.True(t, result.Success,
 		"expected original leader to step down on higher-term message, final state: %s after %d rounds",

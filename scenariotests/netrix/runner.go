@@ -64,6 +64,9 @@ func Run(tc *TestCase, env *rafttest.InteractionEnv) RunResult {
 		if tc.StateMachine != nil {
 			tc.StateMachine.Reset()
 		}
+		if tc.ResetFunc != nil {
+			tc.ResetFunc()
+		}
 		last = runOnce(tc, tc.EnvFunc())
 		if last.Success {
 			last.Iteration = i + 1

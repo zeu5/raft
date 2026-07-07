@@ -19,16 +19,18 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.etcd.io/raft/v3"
-	"go.etcd.io/raft/v3/scenariotests/netrix"
 	pb "go.etcd.io/raft/v3/raftpb"
 	"go.etcd.io/raft/v3/rafttest"
+	"go.etcd.io/raft/v3/scenariotests/netrix"
 )
 
 // TestPreVoteMessagesSentBeforeRealVote verifies that with PreVote enabled,
 // the cluster sends MsgPreVote before MsgVote, implementing the pre-vote
 // protocol to prevent term disruption.
 func TestPreVoteMessagesSentBeforeRealVote(t *testing.T) {
-	env := newEnvWithOpts(t, 3, func(c *raft.Config) { c.PreVote = true })
+	envFunc := func() *rafttest.InteractionEnv {
+		return newEnvWithOpts(t, 3, func(c *raft.Config) { c.PreVote = true })
+	}
 
 	sm := netrix.NewStateMachine()
 	init := sm.Builder()
@@ -42,7 +44,7 @@ func TestPreVoteMessagesSentBeforeRealVote(t *testing.T) {
 		StateMachine: sm,
 		SetupFunc:    func(e *rafttest.InteractionEnv) error { return e.Campaign(0) },
 	}
-	result := netrix.Run(tc, env)
+	result := runNetrixTest(t, tc, envFunc)
 	require.NoError(t, result.Err)
 	require.True(t, result.Success,
 		"expected PreVote→Vote→MsgApp sequence, final state: %s", result.FinalState)
@@ -51,7 +53,9 @@ func TestPreVoteMessagesSentBeforeRealVote(t *testing.T) {
 // TestPreVoteGrantedLeadsToElection verifies that a granted PreVote response
 // causes the candidate to proceed with a real MsgVote.
 func TestPreVoteGrantedLeadsToElection(t *testing.T) {
-	env := newEnvWithOpts(t, 3, func(c *raft.Config) { c.PreVote = true })
+	envFunc := func() *rafttest.InteractionEnv {
+		return newEnvWithOpts(t, 3, func(c *raft.Config) { c.PreVote = true })
+	}
 
 	// Track which node sent the granted PreVoteResp.
 	var preVoteGrantedFrom uint64
@@ -81,7 +85,7 @@ func TestPreVoteGrantedLeadsToElection(t *testing.T) {
 		StateMachine: sm,
 		SetupFunc:    func(e *rafttest.InteractionEnv) error { return e.Campaign(0) },
 	}
-	result := netrix.Run(tc, env)
+	result := runNetrixTest(t, tc, envFunc)
 	require.NoError(t, result.Err)
 	require.True(t, result.Success,
 		"expected real MsgVote to follow granted PreVote, final state: %s", result.FinalState)
@@ -92,7 +96,9 @@ func TestPreVoteGrantedLeadsToElection(t *testing.T) {
 // when it rejoins. With PreVote, the stale node's pre-vote is rejected because
 // the cluster is healthy; the cluster leader is not disrupted.
 func TestPreVotePreventsTrumpByStaleNode(t *testing.T) {
-	env := newEnvWithOpts(t, 3, func(c *raft.Config) { c.PreVote = true })
+	envFunc := func() *rafttest.InteractionEnv {
+		return newEnvWithOpts(t, 3, func(c *raft.Config) { c.PreVote = true })
+	}
 
 	part := netrix.IsolateNode(3)
 
@@ -138,7 +144,7 @@ func TestPreVotePreventsTrumpByStaleNode(t *testing.T) {
 		},
 		SetupFunc: func(e *rafttest.InteractionEnv) error { return e.Campaign(0) },
 	}
-	result := netrix.Run(tc, env)
+	result := runNetrixTest(t, tc, envFunc)
 	require.NoError(t, result.Err)
 	require.False(t, result.IsFailure(), "PreVote should prevent stale node from directly disrupting the leader")
 	require.True(t, result.Success,

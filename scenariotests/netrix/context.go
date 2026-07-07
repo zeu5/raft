@@ -70,32 +70,31 @@ func NewContext() *Context {
 	}
 }
 
-// getInt retrieves an int from VarSet, returning 0 if absent.
-func (c *Context) getInt(key string) int {
-	if v, ok := c.VarSet[key]; ok {
-		if n, ok := v.(int); ok {
-			return n
-		}
-	}
-	return 0
+// GetVar retrieves a typed value from VarSet.
+func GetVar[T any](c *Context, key string) (T, bool) {
+	v, ok := c.VarSet[key].(T)
+	return v, ok
 }
 
-// setInt stores an int in VarSet.
-func (c *Context) setInt(key string, val int) {
+// SetVar stores a typed value in VarSet.
+func SetVar[T any](c *Context, key string, val T) {
 	c.VarSet[key] = val
 }
 
-// getMsgs retrieves a message slice from VarSet, returning nil if absent.
-func (c *Context) getMsgs(key string) []*pb.Message {
-	if v, ok := c.VarSet[key]; ok {
-		if msgs, ok := v.([]*pb.Message); ok {
-			return msgs
-		}
-	}
-	return nil
+func (c *Context) getInt(key string) int {
+	v, _ := GetVar[int](c, key)
+	return v
 }
 
-// setMsgs stores a message slice in VarSet.
+func (c *Context) setInt(key string, val int) {
+	SetVar(c, key, val)
+}
+
+func (c *Context) getMsgs(key string) []*pb.Message {
+	v, _ := GetVar[[]*pb.Message](c, key)
+	return v
+}
+
 func (c *Context) setMsgs(key string, msgs []*pb.Message) {
-	c.VarSet[key] = msgs
+	SetVar(c, key, msgs)
 }

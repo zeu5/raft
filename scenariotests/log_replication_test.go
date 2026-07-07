@@ -18,15 +18,15 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"go.etcd.io/raft/v3/scenariotests/netrix"
 	pb "go.etcd.io/raft/v3/raftpb"
 	"go.etcd.io/raft/v3/rafttest"
+	"go.etcd.io/raft/v3/scenariotests/netrix"
 )
 
 // TestLeaderSendsEntriesToFollowers verifies that after election the leader
 // replicates proposed entries via MsgApp (TLA+ AppendEntries action).
 func TestLeaderSendsEntriesToFollowers(t *testing.T) {
-	env := newEnv(t, 3)
+	envFunc := func() *rafttest.InteractionEnv { return newEnv(t, 3) }
 
 	sm := netrix.NewStateMachine()
 	sm.Builder().On(hasEntries(), netrix.SuccessState).MarkSuccess()
@@ -43,7 +43,7 @@ func TestLeaderSendsEntriesToFollowers(t *testing.T) {
 		},
 		SetupFunc: func(e *rafttest.InteractionEnv) error { return e.Campaign(0) },
 	}
-	result := netrix.Run(tc, env)
+	result := runNetrixTest(t, tc, envFunc)
 	require.NoError(t, result.Err)
 	require.True(t, result.Success, "expected leader to send log entries to followers, final state: %s", result.FinalState)
 }
@@ -52,7 +52,7 @@ func TestLeaderSendsEntriesToFollowers(t *testing.T) {
 // after receiving entries, which is required for the leader to advance
 // commitIndex (TLA+ AdvanceCommitIndex action).
 func TestFollowerAcknowledgesAppend(t *testing.T) {
-	env := newEnv(t, 3)
+	envFunc := func() *rafttest.InteractionEnv { return newEnv(t, 3) }
 
 	acks := netrix.Count("acks")
 	sm := netrix.NewStateMachine()
@@ -77,7 +77,7 @@ func TestFollowerAcknowledgesAppend(t *testing.T) {
 		},
 		SetupFunc: func(e *rafttest.InteractionEnv) error { return e.Campaign(0) },
 	}
-	result := netrix.Run(tc, env)
+	result := runNetrixTest(t, tc, envFunc)
 	require.NoError(t, result.Err)
 	require.True(t, result.Success, "expected both followers to acknowledge appended entries, final state: %s", result.FinalState)
 }
@@ -85,7 +85,7 @@ func TestFollowerAcknowledgesAppend(t *testing.T) {
 // TestHeartbeatsSentByLeader verifies that a leader periodically sends
 // MsgHeartbeat messages to maintain its leadership (TLA+ Heartbeat(i,j) action).
 func TestHeartbeatsSentByLeader(t *testing.T) {
-	env := newEnv(t, 3)
+	envFunc := func() *rafttest.InteractionEnv { return newEnv(t, 3) }
 
 	hb := netrix.Count("hb")
 	sm := netrix.NewStateMachine()
@@ -105,7 +105,7 @@ func TestHeartbeatsSentByLeader(t *testing.T) {
 		TickFunc:     func(e *rafttest.InteractionEnv, _ int) { tickAll(e) },
 		SetupFunc:    func(e *rafttest.InteractionEnv) error { return e.Campaign(0) },
 	}
-	result := netrix.Run(tc, env)
+	result := runNetrixTest(t, tc, envFunc)
 	require.NoError(t, result.Err)
 	require.True(t, result.Success, "expected at least 3 heartbeats from leader, final state: %s", result.FinalState)
 }
@@ -113,7 +113,7 @@ func TestHeartbeatsSentByLeader(t *testing.T) {
 // TestDroppedAppendRetriedByLeader verifies that the leader retries dropped
 // MsgApp messages, ensuring eventual delivery despite unreliable networks.
 func TestDroppedAppendRetriedByLeader(t *testing.T) {
-	env := newEnv(t, 3)
+	envFunc := func() *rafttest.InteractionEnv { return newEnv(t, 3) }
 
 	dropped := netrix.Count("dropped")
 
@@ -145,7 +145,7 @@ func TestDroppedAppendRetriedByLeader(t *testing.T) {
 		},
 		SetupFunc: func(e *rafttest.InteractionEnv) error { return e.Campaign(0) },
 	}
-	result := netrix.Run(tc, env)
+	result := runNetrixTest(t, tc, envFunc)
 	require.NoError(t, result.Err)
 	require.True(t, result.Success, "expected leader to retry dropped AppendEntries, final state: %s", result.FinalState)
 }
@@ -154,7 +154,7 @@ func TestDroppedAppendRetriedByLeader(t *testing.T) {
 // majority quorum, even when minority nodes are unreachable (QuorumLogInv).
 // In a 5-node cluster, commit proceeds when 3 nodes (majority) acknowledge.
 func TestCommitRequiresMajority(t *testing.T) {
-	env := newEnv(t, 5)
+	envFunc := func() *rafttest.InteractionEnv { return newEnv(t, 5) }
 
 	// Count only acknowledgements from nodes in the majority partition.
 	acks := netrix.Count("majority-acks")
@@ -182,7 +182,7 @@ func TestCommitRequiresMajority(t *testing.T) {
 		},
 		SetupFunc: func(e *rafttest.InteractionEnv) error { return e.Campaign(0) },
 	}
-	result := netrix.Run(tc, env)
+	result := runNetrixTest(t, tc, envFunc)
 	require.NoError(t, result.Err)
 	require.True(t, result.Success, "commit should proceed with majority quorum only, final state: %s", result.FinalState)
 }

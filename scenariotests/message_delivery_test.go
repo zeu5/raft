@@ -18,16 +18,16 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"go.etcd.io/raft/v3/scenariotests/netrix"
 	pb "go.etcd.io/raft/v3/raftpb"
 	"go.etcd.io/raft/v3/rafttest"
+	"go.etcd.io/raft/v3/scenariotests/netrix"
 )
 
 // TestDelayedVotesStillElect verifies that buffering all MsgVote messages
 // for several rounds and then releasing them still results in a successful
 // election (TLA+ DuplicateMessage / delayed delivery model).
 func TestDelayedVotesStillElect(t *testing.T) {
-	env := newEnv(t, 3)
+	envFunc := func() *rafttest.InteractionEnv { return newEnv(t, 3) }
 
 	voteBuf := netrix.Set("votes")
 	voteCount := netrix.Count("vote-count")
@@ -58,7 +58,7 @@ func TestDelayedVotesStillElect(t *testing.T) {
 		TickFunc:     func(e *rafttest.InteractionEnv, _ int) { tickAll(e) },
 		SetupFunc:    func(e *rafttest.InteractionEnv) error { return e.Campaign(0) },
 	}
-	result := netrix.Run(tc, env)
+	result := runNetrixTest(t, tc, envFunc)
 	require.NoError(t, result.Err)
 	require.True(t, result.Success,
 		"election should succeed despite delayed vote delivery, final state: %s", result.FinalState)
@@ -68,7 +68,7 @@ func TestDelayedVotesStillElect(t *testing.T) {
 // message delivered twice) is handled idempotently — the cluster still makes
 // progress. This covers the TLA+ DuplicateMessage action.
 func TestDuplicateAppendEntryHandled(t *testing.T) {
-	env := newEnv(t, 3)
+	envFunc := func() *rafttest.InteractionEnv { return newEnv(t, 3) }
 
 	appBuf := netrix.Set("first-app")
 	appCount := netrix.Count("app-count")
@@ -84,7 +84,7 @@ func TestDuplicateAppendEntryHandled(t *testing.T) {
 		hasEntries().And(netrix.IsMessageTo(2)).And(appCount.Lt(1)),
 	).Then(
 		appCount.Incr(),
-		appBuf.Store(),         // buffer
+		appBuf.Store(),          // buffer
 		netrix.DeliverMessage(), // also deliver normally
 	))
 	// On the next round, re-deliver the stored copy (simulating duplicate).
@@ -92,7 +92,7 @@ func TestDuplicateAppendEntryHandled(t *testing.T) {
 		netrix.IsMessageType(pb.MsgHeartbeat).And(replayed.Lt(1)).And(appCount.Geq(1)),
 	).Then(
 		replayed.Incr(),
-		appBuf.DeliverAll(),    // flush duplicate
+		appBuf.DeliverAll(), // flush duplicate
 		netrix.DeliverMessage(),
 	))
 
@@ -109,7 +109,7 @@ func TestDuplicateAppendEntryHandled(t *testing.T) {
 		},
 		SetupFunc: func(e *rafttest.InteractionEnv) error { return e.Campaign(0) },
 	}
-	result := netrix.Run(tc, env)
+	result := runNetrixTest(t, tc, envFunc)
 	require.NoError(t, result.Err)
 	require.True(t, result.Success,
 		"cluster should progress despite duplicate AppendEntries, final state: %s", result.FinalState)
@@ -119,7 +119,7 @@ func TestDuplicateAppendEntryHandled(t *testing.T) {
 // messages does not cause the cluster to lose its leader, as long as entries
 // are still being replicated. The initial no-op MsgApp keeps followers up to date.
 func TestDroppedHeartbeatsNoLeaderLoss(t *testing.T) {
-	env := newEnv(t, 3)
+	envFunc := func() *rafttest.InteractionEnv { return newEnv(t, 3) }
 
 	// After election, leader should keep sending MsgApp (either entries or
 	// no-ops) even without heartbeats.
@@ -151,7 +151,7 @@ func TestDroppedHeartbeatsNoLeaderLoss(t *testing.T) {
 		},
 		SetupFunc: func(e *rafttest.InteractionEnv) error { return e.Campaign(0) },
 	}
-	result := netrix.Run(tc, env)
+	result := runNetrixTest(t, tc, envFunc)
 	require.NoError(t, result.Err)
 	require.True(t, result.Success,
 		"cluster should keep making progress despite dropped heartbeats, final state: %s", result.FinalState)
@@ -162,7 +162,7 @@ func TestDroppedHeartbeatsNoLeaderLoss(t *testing.T) {
 // acknowledges the entries and the leader commits them. This exercises the
 // LogMatchingInv property — the follower reconciles its log correctly.
 func TestOutOfOrderAppendHandled(t *testing.T) {
-	env := newEnv(t, 3)
+	envFunc := func() *rafttest.InteractionEnv { return newEnv(t, 3) }
 
 	appBuf := netrix.Set("app-buffer")
 	buffered := netrix.Count("buffered")
@@ -186,7 +186,7 @@ func TestOutOfOrderAppendHandled(t *testing.T) {
 	).Then(
 		delivered.Incr(),
 		netrix.DeliverMessage(), // deliver current (latest) first
-		appBuf.DeliverAll(),        // then deliver buffered (earlier) entries
+		appBuf.DeliverAll(),     // then deliver buffered (earlier) entries
 	))
 
 	tc := &netrix.TestCase{
@@ -207,7 +207,7 @@ func TestOutOfOrderAppendHandled(t *testing.T) {
 		},
 		SetupFunc: func(e *rafttest.InteractionEnv) error { return e.Campaign(0) },
 	}
-	result := netrix.Run(tc, env)
+	result := runNetrixTest(t, tc, envFunc)
 	require.NoError(t, result.Err)
 	require.True(t, result.Success,
 		"follower should handle out-of-order AppendEntries correctly, final state: %s", result.FinalState)

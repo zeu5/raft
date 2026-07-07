@@ -19,9 +19,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.etcd.io/raft/v3"
-	"go.etcd.io/raft/v3/scenariotests/netrix"
 	pb "go.etcd.io/raft/v3/raftpb"
 	"go.etcd.io/raft/v3/rafttest"
+	"go.etcd.io/raft/v3/scenariotests/netrix"
 )
 
 // TestCheckQuorumLeaderStepsDown verifies that a leader steps down when it
@@ -29,11 +29,13 @@ import (
 // action from the TLA+ spec). After stepping down the former leader responds
 // to the new election with MsgVoteResp, which is the observable signal.
 func TestCheckQuorumLeaderStepsDown(t *testing.T) {
-	env := newEnvWithOpts(t, 3, func(c *raft.Config) {
-		c.CheckQuorum = true
-		c.ElectionTick = 5
-		c.HeartbeatTick = 1
-	})
+	envFunc := func() *rafttest.InteractionEnv {
+		return newEnvWithOpts(t, 3, func(c *raft.Config) {
+			c.CheckQuorum = true
+			c.ElectionTick = 5
+			c.HeartbeatTick = 1
+		})
+	}
 
 	sm := netrix.NewStateMachine()
 	init := sm.Builder()
@@ -64,7 +66,7 @@ func TestCheckQuorumLeaderStepsDown(t *testing.T) {
 		TickFunc:     func(e *rafttest.InteractionEnv, _ int) { tickAll(e) },
 		SetupFunc:    func(e *rafttest.InteractionEnv) error { return e.Campaign(0) },
 	}
-	result := netrix.Run(tc, env)
+	result := runNetrixTest(t, tc, envFunc)
 	require.NoError(t, result.Err)
 	require.True(t, result.Success,
 		"expected leader to step down when quorum unresponsive (CheckQuorum), final state: %s after %d rounds",
@@ -74,11 +76,13 @@ func TestCheckQuorumLeaderStepsDown(t *testing.T) {
 // TestCheckQuorumNotTriggeredWithActiveFollowers verifies that a leader does
 // NOT step down prematurely when followers are actively responding to heartbeats.
 func TestCheckQuorumNotTriggeredWithActiveFollowers(t *testing.T) {
-	env := newEnvWithOpts(t, 3, func(c *raft.Config) {
-		c.CheckQuorum = true
-		c.ElectionTick = 5
-		c.HeartbeatTick = 1
-	})
+	envFunc := func() *rafttest.InteractionEnv {
+		return newEnvWithOpts(t, 3, func(c *raft.Config) {
+			c.CheckQuorum = true
+			c.ElectionTick = 5
+			c.HeartbeatTick = 1
+		})
+	}
 
 	// Track the first leader to detect premature step-down.
 	var leaderID uint64
@@ -98,10 +102,13 @@ func TestCheckQuorumNotTriggeredWithActiveFollowers(t *testing.T) {
 		Name:         "checkquorum-not-triggered-with-active-followers",
 		MaxRounds:    50,
 		StateMachine: sm,
-		TickFunc:     func(e *rafttest.InteractionEnv, _ int) { tickAll(e) },
-		SetupFunc:    func(e *rafttest.InteractionEnv) error { return e.Campaign(0) },
+		ResetFunc: func() {
+			leaderID = 0
+		},
+		TickFunc:  func(e *rafttest.InteractionEnv, _ int) { tickAll(e) },
+		SetupFunc: func(e *rafttest.InteractionEnv) error { return e.Campaign(0) },
 	}
-	result := netrix.Run(tc, env)
+	result := runNetrixTest(t, tc, envFunc)
 	require.NoError(t, result.Err)
 	require.False(t, result.IsFailure(),
 		"leader should not step down when followers are responding (premature CheckQuorum)")

@@ -18,16 +18,16 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"go.etcd.io/raft/v3/scenariotests/netrix"
 	pb "go.etcd.io/raft/v3/raftpb"
 	"go.etcd.io/raft/v3/rafttest"
+	"go.etcd.io/raft/v3/scenariotests/netrix"
 )
 
 // TestLeaderPartitionTriggersNewElection verifies that when the leader is
 // isolated after election, the remaining nodes hold a new election.
 // This covers the TLA+ Timeout and RequestVote actions under network partition.
 func TestLeaderPartitionTriggersNewElection(t *testing.T) {
-	env := newEnv(t, 3)
+	envFunc := func() *rafttest.InteractionEnv { return newEnv(t, 3) }
 
 	leaderSeen := netrix.Count("leader-seen")
 
@@ -59,7 +59,7 @@ func TestLeaderPartitionTriggersNewElection(t *testing.T) {
 		TickFunc:     func(e *rafttest.InteractionEnv, _ int) { tickAll(e) },
 		SetupFunc:    func(e *rafttest.InteractionEnv) error { return e.Campaign(0) },
 	}
-	result := netrix.Run(tc, env)
+	result := runNetrixTest(t, tc, envFunc)
 	require.NoError(t, result.Err)
 	require.True(t, result.Success,
 		"expected new election after partitioning leader, final state: %s after %d rounds",
@@ -69,7 +69,7 @@ func TestLeaderPartitionTriggersNewElection(t *testing.T) {
 // TestMinorityCannotElectLeader verifies the TLA+ QuorumLogInv requirement:
 // a minority partition (2 out of 5 nodes) cannot elect a leader.
 func TestMinorityCannotElectLeader(t *testing.T) {
-	env := newEnv(t, 5)
+	envFunc := func() *rafttest.InteractionEnv { return newEnv(t, 5) }
 
 	// MsgApp from minority would mean it elected a leader — violation.
 	sm := netrix.NewStateMachine()
@@ -96,7 +96,7 @@ func TestMinorityCannotElectLeader(t *testing.T) {
 			return e.Campaign(0)
 		},
 	}
-	result := netrix.Run(tc, env)
+	result := runNetrixTest(t, tc, envFunc)
 	require.NoError(t, result.Err)
 	require.False(t, result.IsFailure(), "minority partition must not elect a leader (QuorumLogInv)")
 }
@@ -104,7 +104,7 @@ func TestMinorityCannotElectLeader(t *testing.T) {
 // TestMajorityPartitionMakesProgress verifies that the majority side of a
 // partition can elect a leader and make progress.
 func TestMajorityPartitionMakesProgress(t *testing.T) {
-	env := newEnv(t, 5)
+	envFunc := func() *rafttest.InteractionEnv { return newEnv(t, 5) }
 
 	sm := netrix.NewStateMachine()
 	sm.Builder().On(
@@ -122,14 +122,14 @@ func TestMajorityPartitionMakesProgress(t *testing.T) {
 		MaxRounds:    100,
 		StateMachine: sm,
 		Filters:      filters,
-		TickFunc: func(e *rafttest.InteractionEnv, _ int) { tickAll(e) },
+		TickFunc:     func(e *rafttest.InteractionEnv, _ int) { tickAll(e) },
 		// Campaign from node 3 which is in the majority partition.
 		SetupFunc: func(e *rafttest.InteractionEnv) error {
 			part.Isolate()
 			return e.Campaign(2)
 		},
 	}
-	result := netrix.Run(tc, env)
+	result := runNetrixTest(t, tc, envFunc)
 	require.NoError(t, result.Err)
 	require.True(t, result.Success,
 		"majority partition should elect a leader, final state: %s after %d rounds",
@@ -139,7 +139,7 @@ func TestMajorityPartitionMakesProgress(t *testing.T) {
 // TestFollowerRejoinsCatchesUp verifies that a partitioned follower receives
 // catch-up AppendEntries upon rejoining, implementing the TLA+ AppendEntries action.
 func TestFollowerRejoinsCatchesUp(t *testing.T) {
-	env := newEnv(t, 3)
+	envFunc := func() *rafttest.InteractionEnv { return newEnv(t, 3) }
 
 	part := netrix.IsolateNode(3)
 
@@ -176,7 +176,7 @@ func TestFollowerRejoinsCatchesUp(t *testing.T) {
 		},
 		SetupFunc: func(e *rafttest.InteractionEnv) error { return e.Campaign(0) },
 	}
-	result := netrix.Run(tc, env)
+	result := runNetrixTest(t, tc, envFunc)
 	require.NoError(t, result.Err)
 	require.True(t, result.Success,
 		"follower should receive catch-up entries after rejoining, final state: %s after %d rounds",

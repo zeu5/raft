@@ -20,10 +20,19 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.etcd.io/raft/v3"
-	"go.etcd.io/raft/v3/scenariotests/netrix"
 	pb "go.etcd.io/raft/v3/raftpb"
 	"go.etcd.io/raft/v3/rafttest"
+	"go.etcd.io/raft/v3/scenariotests/netrix"
 )
+
+const scenarioTestIterations = 20
+
+func runNetrixTest(t *testing.T, tc *netrix.TestCase, envFunc func() *rafttest.InteractionEnv) netrix.RunResult {
+	t.Helper()
+	tc.Iterations = scenarioTestIterations
+	tc.EnvFunc = envFunc
+	return netrix.Run(tc, nil)
+}
 
 // newEnv creates an n-node raft cluster (voters 1..n) bootstrapped at index 10.
 func newEnv(t *testing.T, n int) *rafttest.InteractionEnv {

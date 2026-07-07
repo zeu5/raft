@@ -18,16 +18,16 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"go.etcd.io/raft/v3/scenariotests/netrix"
 	pb "go.etcd.io/raft/v3/raftpb"
 	"go.etcd.io/raft/v3/rafttest"
+	"go.etcd.io/raft/v3/scenariotests/netrix"
 )
 
 // TestSnapshotSentToLaggingFollower verifies the TLA+ SendSnapshot(i,j,index)
 // action: when a follower's log falls behind the leader's compacted entries,
 // the leader sends a MsgSnap to bring the follower up to date.
 func TestSnapshotSentToLaggingFollower(t *testing.T) {
-	env := newEnv(t, 3)
+	envFunc := func() *rafttest.InteractionEnv { return newEnv(t, 3) }
 
 	part := netrix.IsolateNode(3)
 
@@ -56,6 +56,10 @@ func TestSnapshotSentToLaggingFollower(t *testing.T) {
 		MaxRounds:    200,
 		StateMachine: sm,
 		Filters:      filters,
+		ResetFunc: func() {
+			part.Heal()
+			snapshotSetup = false
+		},
 		TickFunc: func(e *rafttest.InteractionEnv, round int) {
 			tickAll(e)
 			switch round {
@@ -82,7 +86,7 @@ func TestSnapshotSentToLaggingFollower(t *testing.T) {
 		},
 		SetupFunc: func(e *rafttest.InteractionEnv) error { return e.Campaign(0) },
 	}
-	result := netrix.Run(tc, env)
+	result := runNetrixTest(t, tc, envFunc)
 	require.NoError(t, result.Err)
 	require.True(t, result.Success,
 		"expected leader to send MsgSnap to lagging follower, final state: %s after %d rounds",
@@ -93,7 +97,7 @@ func TestSnapshotSentToLaggingFollower(t *testing.T) {
 // is delivered to a follower, the leader resumes log replication with
 // subsequent MsgApp entries (the follower is now in sync).
 func TestSnapshotDeliveredAndFollowedByAppend(t *testing.T) {
-	env := newEnv(t, 3)
+	envFunc := func() *rafttest.InteractionEnv { return newEnv(t, 3) }
 
 	part := netrix.IsolateNode(3)
 
@@ -126,6 +130,11 @@ func TestSnapshotDeliveredAndFollowedByAppend(t *testing.T) {
 		MaxRounds:    250,
 		StateMachine: sm,
 		Filters:      filters,
+		ResetFunc: func() {
+			part.Heal()
+			snapshotSetup = false
+			snapDelivered = false
+		},
 		TickFunc: func(e *rafttest.InteractionEnv, round int) {
 			tickAll(e)
 			switch round {
@@ -149,7 +158,7 @@ func TestSnapshotDeliveredAndFollowedByAppend(t *testing.T) {
 		},
 		SetupFunc: func(e *rafttest.InteractionEnv) error { return e.Campaign(0) },
 	}
-	result := netrix.Run(tc, env)
+	result := runNetrixTest(t, tc, envFunc)
 	require.NoError(t, result.Err)
 	require.True(t, result.Success,
 		"expected leader to send MsgApp to follower after snapshot, final state: %s after %d rounds",
@@ -160,7 +169,7 @@ func TestSnapshotDeliveredAndFollowedByAppend(t *testing.T) {
 // a MsgApp with a Commit index lower than it previously announced, even around
 // snapshot installation. This is a proxy for CommittedIsDurableInv.
 func TestCommitIndexMonotonicDuringSnapshot(t *testing.T) {
-	env := newEnv(t, 3)
+	envFunc := func() *rafttest.InteractionEnv { return newEnv(t, 3) }
 
 	part := netrix.IsolateNode(3)
 
@@ -199,6 +208,11 @@ func TestCommitIndexMonotonicDuringSnapshot(t *testing.T) {
 		MaxRounds:    150,
 		StateMachine: sm,
 		Filters:      filters,
+		ResetFunc: func() {
+			part.Heal()
+			snapshotSetup = false
+			maxCommit = make(map[uint64]uint64)
+		},
 		TickFunc: func(e *rafttest.InteractionEnv, round int) {
 			tickAll(e)
 			switch round {
@@ -220,7 +234,7 @@ func TestCommitIndexMonotonicDuringSnapshot(t *testing.T) {
 		},
 		SetupFunc: func(e *rafttest.InteractionEnv) error { return e.Campaign(0) },
 	}
-	result := netrix.Run(tc, env)
+	result := runNetrixTest(t, tc, envFunc)
 	require.NoError(t, result.Err)
 	require.False(t, result.IsFailure(),
 		"CommittedIsDurableInv violated: leader commit index decreased during snapshot scenario")
