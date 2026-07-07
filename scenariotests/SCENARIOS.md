@@ -1,6 +1,6 @@
 # Scenario Tests
 
-Executable scenario tests for the etcd/raft protocol using the [Netrix DSL](../netrixdsl/).
+Executable scenario tests for the etcd/raft protocol using the [Netrix DSL](./netrix).
 Each test drives a cluster through the `rafttest.InteractionEnv` with message-level filter and
 state-machine control, then asserts a safety or liveness outcome.
 
